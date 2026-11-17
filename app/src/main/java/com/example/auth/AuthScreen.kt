@@ -240,8 +240,13 @@ fun AuthScreen(
                             errorMessage = msg
                         },
                         scope = scope,
-                        onAuthCancelled = {
+                        onAuthCancelled = { detail ->
                             isLoading = false
+                            errorMessage = if (!detail.isNullOrBlank()) {
+                                "Masuk Google dibatalkan/ditolak ($detail)."
+                            } else {
+                                "Proses masuk Google dibatalkan. Silakan coba lagi."
+                            }
                         }
                     )
                 },

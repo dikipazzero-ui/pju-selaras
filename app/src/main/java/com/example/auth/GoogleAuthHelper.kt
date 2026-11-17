@@ -81,13 +81,19 @@ fun attemptAutoSignIn(
     }
 }
 
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is android.content.ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
+
 fun onGoogleSignInClicked(
     context: Context,
     credentialManager: CredentialManager,
     onAuthSuccess: () -> Unit,
     onAuthError: (String) -> Unit,
     scope: CoroutineScope,
-    onAuthCancelled: () -> Unit = {}
+    onAuthCancelled: (String?) -> Unit = {}
 ) {
     val clientId = try {
         context.getString(R.string.default_web_client_id)
@@ -95,7 +101,7 @@ fun onGoogleSignInClicked(
         onAuthError("Konfigurasi Google Sign-In tidak ditemukan.")
         return
     }
-    val activity = context as? Activity
+    val activity = context.findActivity()
     if (activity == null) {
         onAuthError("Konteks Activity tidak tersedia untuk masuk.")
         return
@@ -119,7 +125,7 @@ fun onGoogleSignInClicked(
             }
         } catch (e: GetCredentialCancellationException) {
             Log.w(AUTH_TAG, "Google Sign-In flow cancelled or dismissed: ${e.message}", e)
-            onAuthCancelled()
+            onAuthCancelled(e.message)
         } catch (e: Exception) {
             Log.e(AUTH_TAG, "Google Sign-In failed", e)
             onAuthError(e.localizedMessage ?: "Gagal masuk dengan Google")
