@@ -1,0 +1,946 @@
+```html
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Form Checklist PJU - Perumahan Bumi Papan Selaras</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f1f5f9;
+        }
+
+        /* Custom Scrollbar untuk tabel responsif */
+        .table-container::-webkit-scrollbar {
+            height: 8px;
+        }
+        .table-container::-webkit-scrollbar-track {
+            background: #e2e8f0;
+            border-radius: 4px;
+        }
+        .table-container::-webkit-scrollbar-thumb {
+            background: #94a3b8;
+            border-radius: 4px;
+        }
+        .table-container::-webkit-scrollbar-thumb:hover {
+            background: #64748b;
+        }
+
+        /* Styling khusus saat mode Cetak / Print */
+        @media print {
+            body {
+                background-color: #ffffff !important;
+                color: #000000 !important;
+                padding: 0 !important;
+                margin: 0 !important;
+                font-size: 10pt !important;
+            }
+            .no-print {
+                display: none !important;
+            }
+            .print-only {
+                display: block !important;
+            }
+            .print-container {
+                box-shadow: none !important;
+                border: none !important;
+                padding: 0 !important;
+                max-width: 100% !important;
+                width: 100% !important;
+            }
+            table {
+                border-collapse: collapse !important;
+                width: 100% !important;
+            }
+            th, td {
+                border: 1px solid #000000 !important;
+                padding: 2px 4px !important;
+                color: #000000 !important;
+            }
+            .sticky-col {
+                position: static !important;
+                background-color: #ffffff !important;
+            }
+            .cell-btn {
+                border: none !important;
+                background: transparent !important;
+                min-height: 18px !important;
+            }
+            textarea, input, select {
+                border: none !important;
+                background: transparent !important;
+                appearance: none !important;
+                padding: 0 !important;
+            }
+        }
+    </style>
+</head>
+<body class="text-slate-800 antialiased pb-12">
+
+    <!-- Top Control Bar (Tidak ikut tercetak) -->
+    <header class="no-print bg-slate-900 text-white shadow-md sticky top-0 z-30">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center gap-2.5">
+                <div class="bg-amber-400 text-slate-900 p-2 rounded-lg">
+                    <i data-lucide="lightbulb" class="w-5 h-5"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-sm sm:text-base leading-tight">PJU CHECKLIST DIGITAL</h1>
+                    <p class="text-xs text-slate-400">Perumahan Bumi Papan Selaras</p>
+                </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+                <button onclick="exportToCSV()" class="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-medium px-3 py-2 rounded-lg transition shadow-sm">
+                    <i data-lucide="file-spreadsheet" class="w-4 h-4"></i>
+                    <span>Export CSV</span>
+                </button>
+                <button onclick="window.print()" class="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-medium px-3 py-2 rounded-lg transition shadow-sm">
+                    <i data-lucide="printer" class="w-4 h-4"></i>
+                    <span>Cetak Form</span>
+                </button>
+                <button onclick="openResetModal()" class="flex items-center gap-1.5 bg-rose-600/20 hover:bg-rose-600 text-rose-200 hover:text-white border border-rose-500/40 text-xs sm:text-sm font-medium px-3 py-2 rounded-lg transition">
+                    <i data-lucide="rotate-ccw" class="w-4 h-4"></i>
+                    <span class="hidden sm:inline">Reset</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="max-w-7xl mx-auto px-3 sm:px-6 pt-5 print-container">
+
+        <!-- Dashboard Ringkasan & Pengingat (No Print) -->
+        <section class="no-print grid grid-cols-1 md:grid-cols-4 gap-3 mb-5">
+            <!-- Stat 1: Total Pengecekan -->
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-medium text-slate-500 uppercase">Total Sel Terisi</p>
+                    <p id="stat-total" class="text-2xl font-bold text-slate-800 mt-0.5">0</p>
+                </div>
+                <div class="p-3 bg-blue-50 text-blue-600 rounded-xl">
+                    <i data-lucide="clipboard-check" class="w-6 h-6"></i>
+                </div>
+            </div>
+
+            <!-- Stat 2: Lampu Normal -->
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-medium text-slate-500 uppercase">Menyala / Normal (✔)</p>
+                    <p id="stat-normal" class="text-2xl font-bold text-emerald-600 mt-0.5">0</p>
+                </div>
+                <div class="p-3 bg-emerald-50 text-emerald-600 rounded-xl">
+                    <i data-lucide="check-circle-2" class="w-6 h-6"></i>
+                </div>
+            </div>
+
+            <!-- Stat 3: Lampu Bermasalah -->
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-medium text-slate-500 uppercase">Bermasalah / Redup</p>
+                    <p id="stat-issue" class="text-2xl font-bold text-rose-600 mt-0.5">0</p>
+                </div>
+                <div class="p-3 bg-rose-50 text-rose-600 rounded-xl">
+                    <i data-lucide="alert-triangle" class="w-6 h-6"></i>
+                </div>
+            </div>
+
+            <!-- Stat 4: Status Kepatuhan 2 Hari -->
+            <div id="compliance-card" class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-medium text-slate-500 uppercase">Kepatuhan Cek (Max 2 Hari)</p>
+                    <p id="stat-compliance" class="text-sm font-bold text-amber-600 mt-1">Memeriksa jadwal...</p>
+                </div>
+                <div class="p-3 bg-amber-50 text-amber-600 rounded-xl">
+                    <i data-lucide="clock" class="w-6 h-6"></i>
+                </div>
+            </div>
+        </section>
+
+        <!-- Lembar Formulir Utama -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-300 p-4 sm:p-7 print-container">
+
+            <!-- Header Resmi Formulir -->
+            <div class="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4 border-b-2 border-slate-800">
+                <div>
+                    <h2 class="text-lg sm:text-xl font-extrabold tracking-tight text-slate-900 uppercase">
+                        PERUMAHAN BUMI PAPAN SELARAS
+                    </h2>
+                    <h3 class="text-base sm:text-lg font-bold text-slate-800 uppercase">
+                        FORM CHECKLIST PENERANGAN JALAN UMUM
+                    </h3>
+                    <div class="flex flex-wrap items-center gap-2 mt-1.5">
+                        <span class="text-sm font-bold text-slate-700 uppercase">BULAN :</span>
+                        <select id="select-month" onchange="changePeriod()" class="font-bold text-sm uppercase bg-slate-100 border border-slate-300 rounded-lg px-2.5 py-1 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="JANUARI">JANUARI</option>
+                            <option value="FEBRUARI">FEBRUARI</option>
+                            <option value="MARET">MARET</option>
+                            <option value="APRIL">APRIL</option>
+                            <option value="MEI">MEI</option>
+                            <option value="JUNI">JUNI</option>
+                            <option value="JULI">JULI</option>
+                            <option value="AGUSTUS">AGUSTUS</option>
+                            <option value="SEPTEMBER">SEPTEMBER</option>
+                            <option value="OKTOBER">OKTOBER</option>
+                            <option value="NOVEMBER" selected>NOVEMBER</option>
+                            <option value="DESEMBER">DESEMBER</option>
+                        </select>
+                        <select id="select-year" onchange="changePeriod()" class="font-bold text-sm bg-slate-100 border border-slate-300 rounded-lg px-2.5 py-1 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="2025">2025</option>
+                            <option value="2026" selected>2026</option>
+                            <option value="2027">2027</option>
+                            <option value="2028">2028</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Filter Rentang Tanggal & Tanggal Aktif Simulasi -->
+                <div class="no-print flex flex-col sm:flex-row items-stretch sm:items-center gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-500 uppercase mb-0.5">Rentang Tanggal</label>
+                        <select id="select-range" onchange="changeRange()" class="w-full text-xs sm:text-sm font-medium bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="16-24" selected>Tanggal 16 - 24 (Sesuai Form)</option>
+                            <option value="1-15">Tanggal 1 - 15</option>
+                            <option value="16-31">Tanggal 16 - 30/31</option>
+                            <option value="1-30">Semua Tanggal (1 - 30)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-500 uppercase mb-0.5">Tgl Pengecekan Hari Ini</label>
+                        <select id="select-today" onchange="renderTable()" class="w-full text-xs sm:text-sm font-medium bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <!-- Diisi otomatis via JS -->
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Panduan Klik Cepat (No Print) -->
+            <div class="no-print my-3 flex flex-wrap items-center justify-between gap-2 bg-blue-50/80 border border-blue-200 rounded-xl px-3.5 py-2.5 text-xs text-blue-900">
+                <div class="flex items-center gap-2">
+                    <i data-lucide="info" class="w-4 h-4 text-blue-600 shrink-0"></i>
+                    <span><strong>Cara Pengisian:</strong> Klik sel pada tanggal & baris slot PJU untuk mengubah status:</span>
+                </div>
+                <div class="flex flex-wrap items-center gap-2 font-semibold">
+                    <span class="inline-flex items-center gap-1 bg-white px-2 py-0.5 rounded border border-emerald-300 text-emerald-700">✔ Menyala</span>
+                    <span class="inline-flex items-center gap-1 bg-white px-2 py-0.5 rounded border border-amber-300 text-amber-700">⚠ Redup/Kedip</span>
+                    <span class="inline-flex items-center gap-1 bg-white px-2 py-0.5 rounded border border-rose-300 text-rose-700">✖ Mati/Rusak</span>
+                    <span class="text-slate-500 font-normal">| Klik ikon <i data-lucide="tag" class="w-3 h-3 inline"></i> di cluster untuk beri label titik lampu.</span>
+                </div>
+            </div>
+
+            <!-- Tabel Checklist Kondisi Lampu -->
+            <div class="table-container overflow-x-auto mt-3 border border-slate-800 rounded-lg">
+                <table class="w-full border-collapse text-left text-xs sm:text-sm">
+                    <thead>
+                        <tr class="bg-slate-100 text-slate-900 font-bold text-center">
+                            <th rowspan="3" class="border border-slate-800 px-2 py-2 w-10 sticky left-0 bg-slate-100 z-10">NO.</th>
+                            <th rowspan="3" class="border border-slate-800 px-3 py-2 min-w-[170px] sm:min-w-[200px] sticky left-10 bg-slate-100 z-10">CLUSTER</th>
+                            <th id="header-kondisi-span" colspan="9" class="border border-slate-800 py-1.5 uppercase tracking-wider bg-slate-200/70">KONDISI LAMPU</th>
+                        </tr>
+                        <tr class="bg-slate-100 text-slate-900 font-bold text-center">
+                            <th id="header-tanggal-span" colspan="9" class="border border-slate-800 py-1 uppercase tracking-wider">TANGGAL</th>
+                        </tr>
+                        <tr id="date-headers-row" class="bg-slate-50 text-slate-900 font-bold text-center">
+                            <!-- Kolom Tanggal 16 - 24 dirender dinamis -->
+                        </tr>
+                    </thead>
+                    <tbody id="checklist-tbody">
+                        <!-- 9 Cluster x 3 Sub-baris dirender dinamis -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Bagian CATATAN & LAPORAN PERMASALAHAN PJU -->
+            <div class="mt-5 border-2 border-slate-800 rounded-lg overflow-hidden">
+                <div class="bg-slate-100 px-3 py-2 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2">
+                    <span class="font-bold text-xs sm:text-sm uppercase text-slate-900">CATATAN & LAPORAN PERMASALAHAN PJU :</span>
+                    <button onclick="openIssueModal()" class="no-print inline-flex items-center gap-1 bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold px-2.5 py-1 rounded-lg transition shadow-sm">
+                        <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+                        <span>Tambah Laporan Masalah</span>
+                    </button>
+                </div>
+
+                <div class="p-3 bg-white">
+                    <!-- Daftar Permasalahan Terstruktur -->
+                    <div id="issues-list-container" class="mb-3 space-y-2">
+                        <!-- Item masalah muncul di sini -->
+                    </div>
+
+                    <!-- Catatan Bebas (Seperti Kotak Kosong di Form Fisik) -->
+                    <div>
+                        <label for="general-notes" class="no-print block text-[11px] font-semibold text-slate-500 uppercase mb-1">Catatan Tambahan Petugas:</label>
+                        <textarea id="general-notes" rows="3" oninput="saveGeneralNotes()" placeholder="Tulis catatan tambahan hasil patroli PJU di sini..." class="w-full text-xs sm:text-sm text-slate-800 bg-slate-50/50 border border-slate-200 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bagian KETERANGAN & PENANGGUNG JAWAB -->
+            <div class="mt-5 grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
+                <!-- Keterangan Aturan -->
+                <div class="md:col-span-2">
+                    <h4 class="font-bold text-xs sm:text-sm uppercase underline text-slate-900 mb-1.5">KETERANGAN :</h4>
+                    <ol class="list-decimal list-inside text-xs sm:text-sm font-semibold text-slate-800 space-y-1 leading-relaxed">
+                        <li>WAJIB MELAKUKAN CHECKLIST PADA SEMUA PJU MAKSIMAL 2 HARI SEKALI</li>
+                        <li>APABILA PADA SAAT PENGECEKAN TERDAPAT MASALAH, MAKA WAJIB MENGISI PERMASALAHAN PJU PADA FORM YANG TERSEDIA</li>
+                    </ol>
+                </div>
+
+                <!-- Penanggung Jawab -->
+                <div class="flex flex-col justify-between border-t md:border-t-0 pt-3 md:pt-0">
+                    <div>
+                        <p class="font-bold text-xs sm:text-sm text-slate-900">Penanggung Jawab</p>
+                        <div class="h-12 sm:h-14 flex items-end">
+                            <span class="no-print text-[11px] text-slate-400 italic">Tanda tangan / Paraf</span>
+                        </div>
+                    </div>
+                    <div>
+                        <input type="text" id="pic-name" value="R. MOH. GANDI / NERI WELAS ANTORO" oninput="savePicName()" class="w-full font-bold text-xs sm:text-sm uppercase text-slate-900 border-b border-dashed border-slate-400 focus:border-blue-600 focus:outline-none py-0.5 bg-transparent" title="Klik untuk mengedit nama Penanggung Jawab">
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Modal Input Permasalahan PJU -->
+    <div id="issue-modal" class="no-print fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-md overflow-hidden animate-fade-in">
+            <div class="bg-rose-600 text-white px-5 py-3.5 flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <i data-lucide="alert-octagon" class="w-5 h-5"></i>
+                    <h3 class="font-bold text-base">Laporan Permasalahan PJU</h3>
+                </div>
+                <button onclick="closeIssueModal()" class="text-rose-100 hover:text-white p-1 rounded-lg">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <form id="issue-form" onsubmit="submitIssue(event)" class="p-5 space-y-3.5">
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1">Tanggal Kejadian</label>
+                        <input type="number" id="issue-date" min="1" max="31" required class="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-rose-500 focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1">Cluster</label>
+                        <select id="issue-cluster" required class="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-rose-500 focus:outline-none">
+                            <!-- Diisi JS -->
+                        </select>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1">Titik / Slot Lampu</label>
+                        <input type="text" id="issue-unit" placeholder="Misal: Titik 1 / Depan Blok A" required class="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-rose-500 focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1">Status Perbaikan</label>
+                        <select id="issue-status" class="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-rose-500 focus:outline-none">
+                            <option value="Belum Diperbaiki">Belum Diperbaiki</option>
+                            <option value="Dalam Proses">Dalam Proses</option>
+                            <option value="Selesai Diperbaiki">Selesai Diperbaiki</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1">Deskripsi Permasalahan</label>
+                    <textarea id="issue-desc" rows="2" placeholder="Contoh: Lampu mati total, MCB turun, atau kabel putus..." required class="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-rose-500 focus:outline-none"></textarea>
+                </div>
+                <div class="flex justify-end gap-2 pt-2">
+                    <button type="button" onclick="closeIssueModal()" class="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">Batal</button>
+                    <button type="submit" class="px-4 py-2 text-sm font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-lg shadow-sm">Simpan Laporan</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal Edit Label 3 Slot Titik PJU per Cluster -->
+    <div id="slot-modal" class="no-print fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-sm overflow-hidden">
+            <div class="bg-slate-800 text-white px-5 py-3.5 flex items-center justify-between">
+                <h3 id="slot-modal-title" class="font-bold text-sm">Label Titik Lampu PJU</h3>
+                <button onclick="closeSlotModal()" class="text-slate-300 hover:text-white p-1 rounded-lg">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <form onsubmit="saveSlotLabels(event)" class="p-5 space-y-3">
+                <p class="text-xs text-slate-500">Beri keterangan nomor tiang/blok untuk 3 baris checklist pada cluster ini (opsional):</p>
+                <input type="hidden" id="slot-cluster-id">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1">Baris 1</label>
+                    <input type="text" id="slot-label-0" placeholder="Contoh: PJU 01 (Gerbang)" class="w-full text-sm border border-slate-300 rounded-lg px-3 py-1.5">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1">Baris 2</label>
+                    <input type="text" id="slot-label-1" placeholder="Contoh: PJU 02 (Tengah)" class="w-full text-sm border border-slate-300 rounded-lg px-3 py-1.5">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1">Baris 3</label>
+                    <input type="text" id="slot-label-2" placeholder="Contoh: PJU 03 (Ujung)" class="w-full text-sm border border-slate-300 rounded-lg px-3 py-1.5">
+                </div>
+                <div class="flex justify-end gap-2 pt-2">
+                    <button type="button" onclick="closeSlotModal()" class="px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg">Batal</button>
+                    <button type="submit" class="px-4 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg">Simpan Label</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal Konfirmasi Reset (Pengganti confirm()) -->
+    <div id="reset-modal" class="no-print fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-sm p-5 text-center">
+            <div class="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto mb-3">
+                <i data-lucide="trash-2" class="w-6 h-6"></i>
+            </div>
+            <h3 class="font-bold text-base text-slate-900">Reset Data Periode Ini?</h3>
+            <p class="text-xs text-slate-500 mt-1">Semua tanda checklist dan laporan masalah pada bulan & tahun yang dipilih akan dihapus.</p>
+            <div class="flex justify-center gap-2 mt-5">
+                <button onclick="closeResetModal()" class="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg">Batal</button>
+                <button onclick="confirmReset()" class="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-lg">Ya, Hapus Data</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="no-print fixed bottom-5 right-5 bg-slate-900 text-white text-xs font-medium px-4 py-3 rounded-xl shadow-lg transform translate-y-20 opacity-0 transition-all duration-300 z-50 flex items-center gap-2">
+        <i data-lucide="check-circle" class="w-4 h-4 text-emerald-400"></i>
+        <span id="toast-message">Tersimpan otomatis</span>
+    </div>
+
+    <script>
+        // Daftar 9 Cluster sesuai form fisik
+        const CLUSTERS = [
+            { id: 1, name: "PJU KRISAN" },
+            { id: 2, name: "PJU CEMPAKA" },
+            { id: 3, name: "PJU CENDANA" },
+            { id: 4, name: "PJU CEMARA" },
+            { id: 5, name: "PJU FLAMBOYAN 1" },
+            { id: 6, name: "PJU FLAMBOYAN 2" },
+            { id: 7, name: "PJU FLAMBOYAN FASUM" },
+            { id: 8, name: "PJU AKASIA" },
+            { id: 9, name: "RUKO" }
+        ];
+
+        // Status Checklist siklus klik: '' -> 'normal' -> 'warn' -> 'error' -> ''
+        const STATUS_CONFIG = {
+            '': { symbol: '', label: 'Kosong', cellClass: 'bg-white hover:bg-slate-50 text-slate-400' },
+            'normal': { symbol: '✔', label: 'Menyala / Normal', cellClass: 'bg-emerald-50/80 hover:bg-emerald-100 text-emerald-700 font-bold' },
+            'warn': { symbol: '⚠', label: 'Redup / Kedip', cellClass: 'bg-amber-50/90 hover:bg-amber-100 text-amber-700 font-bold' },
+            'error': { symbol: '✖', label: 'Mati / Bermasalah', cellClass: 'bg-rose-50/90 hover:bg-rose-100 text-rose-700 font-bold' }
+        };
+
+        // State Aplikasi
+        let appState = {
+            month: 'NOVEMBER',
+            year: '2026',
+            range: '16-24',
+            todayDate: 17, // Default sesuai timestamp foto (17 Nov 2026)
+            checks: {}, // key: "clusterId_slotIndex_date" -> value: 'normal' | 'warn' | 'error'
+            slotLabels: {}, // key: "clusterId" -> ["Label 1", "Label 2", "Label 3"]
+            issues: [], // { id, date, clusterName, unit, desc, status }
+            generalNotes: '',
+            picName: 'R. MOH. GANDI / NERI WELAS ANTORO'
+        };
+
+        // Mendapatkan key localStorage berdasarkan Bulan & Tahun
+        function getStorageKey() {
+            return `pju_checklist_bps_${appState.month}_${appState.year}`;
+        }
+
+        // Load data dari localStorage
+        function loadPeriodData() {
+            const saved = localStorage.getItem(getStorageKey());
+            if (saved) {
+                try {
+                    const parsed = JSON.parse(saved);
+                    appState.checks = parsed.checks || {};
+                    appState.slotLabels = parsed.slotLabels || {};
+                    appState.issues = parsed.issues || [];
+                    appState.generalNotes = parsed.generalNotes || '';
+                    appState.picName = parsed.picName || 'R. MOH. GANDI / NERI WELAS ANTORO';
+                } catch (e) {
+                    console.error("Gagal memuat data:", e);
+                }
+            } else {
+                appState.checks = {};
+                appState.slotLabels = {};
+                appState.issues = [];
+                appState.generalNotes = '';
+                appState.picName = 'R. MOH. GANDI / NERI WELAS ANTORO';
+            }
+
+            document.getElementById('general-notes').value = appState.generalNotes;
+            document.getElementById('pic-name').value = appState.picName;
+        }
+
+        // Simpan data ke localStorage
+        function savePeriodData(showNotif = false) {
+            const payload = {
+                checks: appState.checks,
+                slotLabels: appState.slotLabels,
+                issues: appState.issues,
+                generalNotes: appState.generalNotes,
+                picName: appState.picName
+            };
+            localStorage.setItem(getStorageKey(), JSON.stringify(payload));
+            updateStats();
+            if (showNotif) showToast("Data tersimpan otomatis");
+        }
+
+        // Mendapatkan array tanggal berdasarkan rentang yang dipilih
+        function getDatesArray() {
+            const range = appState.range;
+            let start = 16, end = 24;
+            if (range === '1-15') { start = 1; end = 15; }
+            else if (range === '16-31') { start = 16; end = 31; }
+            else if (range === '1-30') { start = 1; end = 30; }
+
+            const dates = [];
+            for (let d = start; d <= end; d++) {
+                dates.push(d);
+            }
+            return dates;
+        }
+
+        // Populate dropdown tanggal hari ini & cluster di modal
+        function initSelects() {
+            const todaySelect = document.getElementById('select-today');
+            todaySelect.innerHTML = '';
+            for (let d = 1; d <= 31; d++) {
+                const opt = document.createElement('option');
+                opt.value = d;
+                opt.textContent = `Tanggal ${d}`;
+                if (d === appState.todayDate) opt.selected = true;
+                todaySelect.appendChild(opt);
+            }
+
+            const clusterSelect = document.getElementById('issue-cluster');
+            clusterSelect.innerHTML = '';
+            CLUSTERS.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c.name;
+                opt.textContent = `${c.id}. ${c.name}`;
+                clusterSelect.appendChild(opt);
+            });
+        }
+
+        // Render Tabel Utama (9 Cluster x 3 Sub-baris)
+        function renderTable() {
+            appState.todayDate = parseInt(document.getElementById('select-today').value) || 17;
+            const dates = getDatesArray();
+
+            // Update colspan header
+            document.getElementById('header-kondisi-span').colSpan = dates.length;
+            document.getElementById('header-tanggal-span').colSpan = dates.length;
+
+            // Render Header Tanggal
+            const dateHeaderRow = document.getElementById('date-headers-row');
+            dateHeaderRow.innerHTML = '';
+            dates.forEach(d => {
+                const th = document.createElement('th');
+                const isToday = d === appState.todayDate;
+                th.className = `border border-slate-800 py-1.5 px-1 min-w-[38px] sm:min-w-[44px] text-xs sm:text-sm ${isToday ? 'bg-blue-100 text-blue-900 underline' : ''}`;
+                th.textContent = d;
+                if (isToday) th.title = "Tanggal Pengecekan Aktif";
+                dateHeaderRow.appendChild(th);
+            });
+
+            // Render Body Tabel
+            const tbody = document.getElementById('checklist-tbody');
+            tbody.innerHTML = '';
+
+            CLUSTERS.forEach(cluster => {
+                const labels = appState.slotLabels[cluster.id] || ['', '', ''];
+                const needsCheck = checkClusterCompliance(cluster.id);
+
+                // Setiap cluster memiliki 3 sub-baris (sesuai garis pada form)
+                for (let slot = 0; slot < 3; slot++) {
+                    const tr = document.createElement('tr');
+                    const isLastSlot = slot === 2;
+                    const rowBorderClass = isLastSlot ? 'border-b-2 border-b-slate-800' : '';
+
+                    // Kolom NO. & CLUSTER (rowspan 3 pada slot 0)
+                    if (slot === 0) {
+                        const tdNo = document.createElement('td');
+                        tdNo.rowSpan = 3;
+                        tdNo.className = 'border border-slate-800 border-b-2 border-b-slate-800 text-center font-bold text-slate-900 sticky left-0 bg-white z-10 align-middle';
+                        tdNo.textContent = cluster.id;
+                        tr.appendChild(tdNo);
+
+                        const tdCluster = document.createElement('td');
+                        tdCluster.rowSpan = 3;
+                        tdCluster.className = 'border border-slate-800 border-b-2 border-b-slate-800 px-2.5 py-2 font-bold text-slate-900 sticky left-10 bg-white z-10 align-middle';
+
+                        // Konten Cluster + Indikator Peringatan 2 Hari + Tombol Label
+                        const labelPreview = labels.filter(l => l.trim() !== '').join(', ');
+                        tdCluster.innerHTML = `
+                            <div class="flex items-start justify-between gap-1">
+                                <div>
+                                    <div class="text-xs sm:text-sm leading-snug">${cluster.name}</div>
+                                    ${labelPreview ? `<div class="text-[10px] font-normal text-slate-500 mt-0.5 leading-tight">${labelPreview}</div>` : ''}
+                                    ${needsCheck ? `
+                                        <span class="no-print inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-semibold" title="Belum dicek dalam 2 hari terakhir!">
+                                            <i data-lucide="alert-circle" class="w-3 h-3"></i> Perlu Cek
+                                        </span>
+                                    ` : ''}
+                                </div>
+                                <button onclick="openSlotModal(${cluster.id}, '${cluster.name}')" class="no-print text-slate-400 hover:text-blue-600 p-1 rounded transition shrink-0" title="Atur Label Titik PJU (3 Baris)">
+                                    <i data-lucide="tag" class="w-3.5 h-3.5"></i>
+                                </button>
+                            </div>
+                        `;
+                        tr.appendChild(tdCluster);
+                    }
+
+                    // Kolom Sel Tanggal
+                    dates.forEach(date => {
+                        const cellKey = `${cluster.id}_${slot}_${date}`;
+                        const currentStatus = appState.checks[cellKey] || '';
+                        const config = STATUS_CONFIG[currentStatus];
+                        const isToday = date === appState.todayDate;
+
+                        const td = document.createElement('td');
+                        td.className = `border border-slate-800 ${rowBorderClass} p-0 text-center transition-colors ${isToday && !currentStatus ? 'bg-blue-50/40' : ''}`;
+
+                        const btn = document.createElement('button');
+                        btn.type = 'button';
+                        btn.className = `cell-btn w-full h-7 sm:h-8 flex items-center justify-center text-xs sm:text-sm select-none focus:outline-none ${config.cellClass}`;
+                        btn.textContent = config.symbol;
+                        btn.title = `${cluster.name} (${labels[slot] || 'Baris ' + (slot + 1)}) - Tgl ${date}: ${config.label}`;
+                        btn.onclick = () => toggleCellStatus(cluster, slot, date);
+
+                        td.appendChild(btn);
+                        tr.appendChild(td);
+                    });
+
+                    tbody.appendChild(tr);
+                }
+            });
+
+            renderIssuesList();
+            updateStats();
+            lucide.createIcons();
+        }
+
+        // Klik sel untuk siklus status: '' -> 'normal' -> 'warn' -> 'error' -> ''
+        function toggleCellStatus(cluster, slot, date) {
+            const key = `${cluster.id}_${slot}_${date}`;
+            const order = ['', 'normal', 'warn', 'error'];
+            const current = appState.checks[key] || '';
+            const next = order[(order.indexOf(current) + 1) % order.length];
+
+            if (next === '') {
+                delete appState.checks[key];
+            } else {
+                appState.checks[key] = next;
+            }
+
+            savePeriodData(true);
+            renderTable();
+
+            // Jika ditandai Bermasalah (✖), tawarkan langsung isi form permasalahan sesuai Keterangan Poin 2
+            if (next === 'error') {
+                const labels = appState.slotLabels[cluster.id] || [];
+                const unitName = labels[slot] ? labels[slot] : `Baris/Titik ${slot + 1}`;
+                openIssueModal(date, cluster.name, unitName);
+            }
+        }
+
+        // Cek apakah cluster sudah dicek dalam 2 hari terakhir (berdasarkan todayDate)
+        function checkClusterCompliance(clusterId) {
+            const today = appState.todayDate;
+            const checkDays = [today, today - 1].filter(d => d >= 1);
+            for (const d of checkDays) {
+                for (let s = 0; s < 3; s++) {
+                    if (appState.checks[`${clusterId}_${s}_${d}`]) {
+                        return false; // Sudah dicek dalam <= 2 hari
+                    }
+                }
+            }
+            return true; // Belum dicek > 2 hari
+        }
+
+        // Update Statistik & Status Kepatuhan 2 Hari
+        function updateStats() {
+            let total = 0, normal = 0, issue = 0;
+            Object.values(appState.checks).forEach(val => {
+                if (val) {
+                    total++;
+                    if (val === 'normal') normal++;
+                    if (val === 'warn' || val === 'error') issue++;
+                }
+            });
+
+            document.getElementById('stat-total').textContent = total;
+            document.getElementById('stat-normal').textContent = normal;
+            document.getElementById('stat-issue').textContent = issue;
+
+            // Hitung kepatuhan 2 hari untuk 9 cluster
+            let overdueCount = 0;
+            CLUSTERS.forEach(c => {
+                if (checkClusterCompliance(c.id)) overdueCount++;
+            });
+
+            const compText = document.getElementById('stat-compliance');
+            if (overdueCount === 0) {
+                compText.textContent = "Semua Cluster Terpantau ✔";
+                compText.className = "text-xs sm:text-sm font-bold text-emerald-600 mt-1";
+            } else {
+                compText.textContent = `${overdueCount} Cluster Perlu Dicek!`;
+                compText.className = "text-xs sm:text-sm font-bold text-amber-600 mt-1";
+            }
+        }
+
+        // Render Daftar Laporan Permasalahan PJU
+        function renderIssuesList() {
+            const container = document.getElementById('issues-list-container');
+            container.innerHTML = '';
+
+            if (appState.issues.length === 0) {
+                container.innerHTML = `
+                    <p class="no-print text-xs text-slate-400 italic py-1">Belum ada laporan permasalahan PJU tercatat pada periode ini.</p>
+                `;
+                return;
+            }
+
+            appState.issues.forEach((item, idx) => {
+                const badgeColor = item.status === 'Selesai Diperbaiki'
+                    ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                    : item.status === 'Dalam Proses'
+                    ? 'bg-amber-100 text-amber-800 border-amber-300'
+                    : 'bg-rose-100 text-rose-800 border-rose-300';
+
+                const div = document.createElement('div');
+                div.className = 'flex flex-wrap items-center justify-between gap-2 bg-rose-50/50 border border-rose-200 rounded-lg px-3 py-2 text-xs';
+                div.innerHTML = `
+                    <div class="space-y-0.5">
+                        <div class="font-bold text-slate-900">
+                            ${idx + 1}. [Tgl ${item.date} ${appState.month}] ${item.clusterName} — <span class="text-rose-700">${item.unit}</span>
+                        </div>
+                        <div class="text-slate-700">${item.desc}</div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button onclick="cycleIssueStatus(${item.id})" class="px-2 py-0.5 rounded border font-semibold ${badgeColor}" title="Klik untuk ubah status perbaikan">
+                            ${item.status}
+                        </button>
+                        <button onclick="deleteIssue(${item.id})" class="no-print text-slate-400 hover:text-rose-600 p-1" title="Hapus laporan">
+                            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                        </button>
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+            lucide.createIcons();
+        }
+
+        // Modal Laporan Masalah
+        function openIssueModal(date = null, clusterName = null, unit = '') {
+            document.getElementById('issue-date').value = date || appState.todayDate;
+            if (clusterName) document.getElementById('issue-cluster').value = clusterName;
+            document.getElementById('issue-unit').value = unit;
+            document.getElementById('issue-desc').value = '';
+            document.getElementById('issue-status').value = 'Belum Diperbaiki';
+
+            const modal = document.getElementById('issue-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeIssueModal() {
+            const modal = document.getElementById('issue-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function submitIssue(e) {
+            e.preventDefault();
+            const newIssue = {
+                id: Date.now(),
+                date: document.getElementById('issue-date').value,
+                clusterName: document.getElementById('issue-cluster').value,
+                unit: document.getElementById('issue-unit').value.trim(),
+                desc: document.getElementById('issue-desc').value.trim(),
+                status: document.getElementById('issue-status').value
+            };
+            appState.issues.push(newIssue);
+            savePeriodData(true);
+            renderIssuesList();
+            closeIssueModal();
+        }
+
+        function cycleIssueStatus(id) {
+            const statuses = ['Belum Diperbaiki', 'Dalam Proses', 'Selesai Diperbaiki'];
+            const item = appState.issues.find(i => i.id === id);
+            if (item) {
+                item.status = statuses[(statuses.indexOf(item.status) + 1) % statuses.length];
+                savePeriodData(true);
+                renderIssuesList();
+            }
+        }
+
+        function deleteIssue(id) {
+            appState.issues = appState.issues.filter(i => i.id !== id);
+            savePeriodData(true);
+            renderIssuesList();
+        }
+
+        // Modal Label 3 Slot per Cluster
+        function openSlotModal(clusterId, clusterName) {
+            document.getElementById('slot-cluster-id').value = clusterId;
+            document.getElementById('slot-modal-title').textContent = `Label Titik: ${clusterName}`;
+            const labels = appState.slotLabels[clusterId] || ['', '', ''];
+            document.getElementById('slot-label-0').value = labels[0] || '';
+            document.getElementById('slot-label-1').value = labels[1] || '';
+            document.getElementById('slot-label-2').value = labels[2] || '';
+
+            const modal = document.getElementById('slot-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeSlotModal() {
+            const modal = document.getElementById('slot-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function saveSlotLabels(e) {
+            e.preventDefault();
+            const cid = document.getElementById('slot-cluster-id').value;
+            appState.slotLabels[cid] = [
+                document.getElementById('slot-label-0').value.trim(),
+                document.getElementById('slot-label-1').value.trim(),
+                document.getElementById('slot-label-2').value.trim()
+            ];
+            savePeriodData(true);
+            closeSlotModal();
+            renderTable();
+        }
+
+        // Ganti Bulan / Tahun / Rentang
+        function changePeriod() {
+            appState.month = document.getElementById('select-month').value;
+            appState.year = document.getElementById('select-year').value;
+            loadPeriodData();
+            renderTable();
+            showToast(`Memuat periode ${appState.month} ${appState.year}`);
+        }
+
+        function changeRange() {
+            appState.range = document.getElementById('select-range').value;
+            renderTable();
+        }
+
+        function saveGeneralNotes() {
+            appState.generalNotes = document.getElementById('general-notes').value;
+            savePeriodData(false);
+        }
+
+        function savePicName() {
+            appState.picName = document.getElementById('pic-name').value;
+            savePeriodData(false);
+        }
+
+        // Modal Reset
+        function openResetModal() {
+            const modal = document.getElementById('reset-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeResetModal() {
+            const modal = document.getElementById('reset-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function confirmReset() {
+            localStorage.removeItem(getStorageKey());
+            loadPeriodData();
+            renderTable();
+            closeResetModal();
+            showToast("Data periode berhasil direset");
+        }
+
+        // Export ke CSV (Excel Friendly)
+        function exportToCSV() {
+            const dates = getDatesArray();
+            let csv = [];
+
+            // Header Info
+            csv.push(`"PERUMAHAN BUMI PAPAN SELARAS"`);
+            csv.push(`"FORM CHECKLIST PENERANGAN JALAN UMUM - BULAN ${appState.month} ${appState.year}"`);
+            csv.push('');
+
+            // Header Tabel
+            const headerRow = ['NO.', 'CLUSTER', 'BARIS / TITIK PJU', ...dates.map(d => `TGL ${d}`)];
+            csv.push(headerRow.join(','));
+
+            // Isi Tabel
+            CLUSTERS.forEach(c => {
+                const labels = appState.slotLabels[c.id] || ['', '', ''];
+                for (let s = 0; s < 3; s++) {
+                    const row = [
+                        s === 0 ? c.id : '',
+                        s === 0 ? `"${c.name}"` : '',
+                        `"${labels[s] || 'Baris ' + (s + 1)}"`
+                    ];
+                    dates.forEach(d => {
+                        const status = appState.checks[`${c.id}_${s}_${d}`] || '';
+                        const text = status === 'normal' ? 'MENYALA' : status === 'warn' ? 'REDUP' : status === 'error' ? 'MATI/RUSAK' : '';
+                        row.push(`"${text}"`);
+                    });
+                    csv.push(row.join(','));
+                }
+            });
+
+            csv.push('');
+            csv.push(`"LAPORAN PERMASALAHAN PJU"`);
+            csv.push(`"Tanggal","Cluster","Titik PJU","Permasalahan","Status"`);
+            appState.issues.forEach(i => {
+                csv.push(`"${i.date} ${appState.month}","${i.clusterName}","${i.unit}","${i.desc}","${i.status}"`);
+            });
+
+            csv.push('');
+            csv.push(`"CATATAN UMUM:","${appState.generalNotes.replace(/"/g, '""')}"`);
+            csv.push(`"PENANGGUNG JAWAB:","${appState.picName}"`);
+
+            const blob = new Blob([csv.join('\n')], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Checklist_PJU_BPS_${appState.month}_${appState.year}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast("File CSV berhasil diunduh");
+        }
+
+        // Toast Notification Helper
+        let toastTimeout;
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            document.getElementById('toast-message').textContent = msg;
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            clearTimeout(toastTimeout);
+            toastTimeout = setTimeout(() => {
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 2200);
+        }
+
+        // Inisialisasi saat halaman dimuat
+        window.onload = function() {
+            initSelects();
+            loadPeriodData();
+            renderTable();
+            lucide.createIcons();
+        };
+    </script>
+</body>
+</html>
+```

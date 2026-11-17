@@ -1,0 +1,125 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidChecklistPeriod(data, userId) {
+      return data.userId is string &&
+             data.userId == userId &&
+             data.month is string &&
+             data.month.size() >= 3 &&
+             data.month.size() <= 20 &&
+             data.year is int &&
+             data.year >= 2020 &&
+             data.year <= 2100 &&
+             data.checks is map &&
+             data.checks.size() <= 1000 &&
+             data.slotLabels is map &&
+             data.slotLabels.size() <= 20 &&
+             data.generalNotes is string &&
+             data.generalNotes.size() <= 2000 &&
+             data.picName is string &&
+             data.picName.size() <= 150 &&
+             data.createdAt is timestamp &&
+             data.createdAt <= request.time &&
+             data.updatedAt is timestamp &&
+             data.updatedAt <= request.time;
+    }
+
+    function isValidPjuIssue(data, userId, periodId) {
+      return data.userId is string &&
+             data.userId == userId &&
+             data.periodId is string &&
+             data.periodId == periodId &&
+             data.date is int &&
+             data.date >= 1 &&
+             data.date <= 31 &&
+             data.clusterId is int &&
+             data.clusterId >= 1 &&
+             data.clusterId <= 9 &&
+             data.clusterName is string &&
+             data.clusterName.size() >= 1 &&
+             data.clusterName.size() <= 60 &&
+             data.unit is string &&
+             data.unit.size() >= 1 &&
+             data.unit.size() <= 100 &&
+             data.desc is string &&
+             data.desc.size() >= 1 &&
+             data.desc.size() <= 500 &&
+             data.status in ['Belum Diperbaiki', 'Dalam Proses', 'Selesai Diperbaiki'] &&
+             data.createdAt is timestamp &&
+             data.createdAt <= request.time &&
+             data.updatedAt is timestamp &&
+             data.updatedAt <= request.time;
+    }
+
+    match /users/{userId}/periods/{periodId} {
+      allow get: if isOwner(userId) && isValidId(periodId);
+      allow list: if isOwner(userId);
+
+      allow create: if isOwner(userId) &&
+                       isValidId(periodId) &&
+                       incoming().keys().hasAll(['userId', 'month', 'year', 'checks', 'slotLabels', 'generalNotes', 'picName', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'month', 'year', 'checks', 'slotLabels', 'generalNotes', 'picName', 'createdAt', 'updatedAt']) &&
+                       isValidChecklistPeriod(incoming(), userId);
+
+      allow update: if isOwner(userId) &&
+                       isValidId(periodId) &&
+                       isValidChecklistPeriod(incoming(), userId) &&
+                       incoming().userId == existing().userId &&
+                       incoming().month == existing().month &&
+                       incoming().year == existing().year &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['checks', 'slotLabels', 'generalNotes', 'picName', 'updatedAt']);
+
+      allow delete: if isOwner(userId) && isValidId(periodId);
+
+      match /issues/{issueId} {
+        allow get: if isOwner(userId) && isValidId(periodId) && isValidId(issueId);
+        allow list: if isOwner(userId) && isValidId(periodId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(periodId) &&
+                         isValidId(issueId) &&
+                         incoming().keys().hasAll(['userId', 'periodId', 'date', 'clusterId', 'clusterName', 'unit', 'desc', 'status', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'periodId', 'date', 'clusterId', 'clusterName', 'unit', 'desc', 'status', 'createdAt', 'updatedAt']) &&
+                         isValidPjuIssue(incoming(), userId, periodId) &&
+                         existsAfter(/databases/$(database)/documents/users/$(userId)/periods/$(periodId));
+
+        allow update: if isOwner(userId) &&
+                         isValidId(periodId) &&
+                         isValidId(issueId) &&
+                         isValidPjuIssue(incoming(), userId, periodId) &&
+                         incoming().userId == existing().userId &&
+                         incoming().periodId == existing().periodId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['date', 'clusterId', 'clusterName', 'unit', 'desc', 'status', 'updatedAt']);
+
+        allow delete: if isOwner(userId) && isValidId(periodId) && isValidId(issueId);
+      }
+    }
+  }
+}

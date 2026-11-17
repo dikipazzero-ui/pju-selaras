@@ -1,0 +1,132 @@
+{
+  "entities": {
+    "ChecklistPeriod": {
+      "title": "ChecklistPeriod",
+      "description": "Monthly PJU inspection checklist sheet containing lamp cell statuses, custom 3-slot labels per cluster, general patrol notes, and PIC name.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Authenticated owner UID matching Firebase Auth."
+        },
+        "month": {
+          "type": "string",
+          "description": "Month name in uppercase Indonesian (e.g. NOVEMBER)."
+        },
+        "year": {
+          "type": "integer",
+          "description": "Four-digit inspection year (e.g. 2026)."
+        },
+        "checks": {
+          "type": "object",
+          "description": "Map of cell keys '{clusterId}_{slot}_{date}' to status string ('normal', 'warn', or 'error')."
+        },
+        "slotLabels": {
+          "type": "object",
+          "description": "Map of clusterId string ('1'..'9') to list of 3 slot label strings."
+        },
+        "generalNotes": {
+          "type": "string",
+          "description": "Freeform patrol notes from the officer."
+        },
+        "picName": {
+          "type": "string",
+          "description": "Penanggung Jawab (Person In Charge) name(s)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp (FieldValue.serverTimestamp()) when period sheet was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp (FieldValue.serverTimestamp()) when period sheet was last updated."
+        }
+      },
+      "required": [
+        "userId",
+        "month",
+        "year",
+        "checks",
+        "slotLabels",
+        "generalNotes",
+        "picName",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PjuIssue": {
+      "title": "PjuIssue",
+      "description": "Structured PJU malfunction or maintenance issue report logged during patrol.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Authenticated owner UID matching Firebase Auth."
+        },
+        "periodId": {
+          "type": "string",
+          "description": "Parent period document ID (e.g. '2026_NOVEMBER')."
+        },
+        "date": {
+          "type": "integer",
+          "description": "Day of the month (1..31) when issue was observed."
+        },
+        "clusterId": {
+          "type": "integer",
+          "description": "Cluster numeric ID (1..9)."
+        },
+        "clusterName": {
+          "type": "string",
+          "description": "Cluster name (e.g. 'PJU KRISAN')."
+        },
+        "unit": {
+          "type": "string",
+          "description": "Lamp pole / slot identifier."
+        },
+        "desc": {
+          "type": "string",
+          "description": "Description of the PJU issue."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["Belum Diperbaiki", "Dalam Proses", "Selesai Diperbaiki"],
+          "description": "Repair status."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp (FieldValue.serverTimestamp()) when issue was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp (FieldValue.serverTimestamp()) when issue was last updated."
+        }
+      },
+      "required": [
+        "userId",
+        "periodId",
+        "date",
+        "clusterId",
+        "clusterName",
+        "unit",
+        "desc",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/periods/{periodId}": {
+      "schema": { "$ref": "#/entities/ChecklistPeriod" },
+      "description": "User-scoped monthly PJU checklist period documents."
+    },
+    "/users/{userId}/periods/{periodId}/issues/{issueId}": {
+      "schema": { "$ref": "#/entities/PjuIssue" },
+      "description": "User-scoped PJU issue reports belonging to a specific monthly period."
+    }
+  }
+}
