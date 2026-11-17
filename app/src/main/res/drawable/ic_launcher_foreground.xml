@@ -3,6 +3,6 @@
     <item
         android:width="66dp"
         android:height="66dp"
-        android:drawable="@drawable/ic_launcher_foreground_art_1794907987639"
+        android:drawable="@drawable/laporan_harian_icon_1794934155379"
         android:gravity="center" />
 </layer-list>

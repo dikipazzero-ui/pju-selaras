@@ -1,6 +1,8 @@
 {
-  "name": "PJU BPS",
-  "description": "Digital street light (PJU) inspection checklist and issue tracker for Perumahan Bumi Papan Selaras.",
+  "name": "LAPORAN HARIAN BPS",
+  "description": "Aplikasi laporan harian online dengan 4 slot foto dokumentasi, tanggal/hari/jam, rangkuman bulanan, dan live chat tim dengan foto serta voice note untuk Perumahan Bumi Papan Selaras.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

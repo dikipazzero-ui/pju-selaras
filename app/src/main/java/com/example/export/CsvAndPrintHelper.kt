@@ -390,4 +390,150 @@ object CsvAndPrintHelper {
         }
         webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
     }
+
+    fun shareDailyReportsCsv(
+        context: Context,
+        workspaceName: String,
+        monthLabel: String,
+        year: Int,
+        reports: List<com.example.model.DailyReport>
+    ): Result<Unit> = runCatching {
+        fun csvEscape(value: String): String =
+            "\"" + value.replace("\"", "\"\"") + "\""
+
+        val lines = mutableListOf<String>()
+        lines.add(csvEscape("LAPORAN HARIAN BPS - PERUMAHAN BUMI PAPAN SELARAS"))
+        lines.add(csvEscape("TIM: $workspaceName | RANGKUMAN BULAN $monthLabel $year"))
+        lines.add("")
+        lines.add(
+            listOf("NO", "HARI", "TANGGAL", "JAM", "NAMA ANGGOTA", "LOKASI / AREA", "KETERANGAN PELAPORAN", "JUMLAH FOTO")
+                .joinToString(",") { csvEscape(it) }
+        )
+        reports.forEachIndexed { idx, r ->
+            val resolvedDay = r.dayName.ifBlank { com.example.model.indonesianDayNameFromIsoDate(r.eventDate) }
+            lines.add(
+                listOf(
+                    (idx + 1).toString(),
+                    resolvedDay,
+                    r.eventDate,
+                    r.eventTime,
+                    r.memberName,
+                    r.location.ifBlank { "-" },
+                    r.description,
+                    "${r.photos.size} foto"
+                ).joinToString(",") { csvEscape(it) }
+            )
+        }
+
+        val exportDir = File(context.cacheDir, "exports").apply { mkdirs() }
+        val outFile = File(exportDir, "Laporan_Harian_BPS_${monthLabel}_${year}.csv")
+        outFile.writeText("\uFEFF${lines.joinToString("\n")}", Charsets.UTF_8)
+
+        val uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            outFile
+        )
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/csv"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, "Laporan Harian BPS - $monthLabel $year")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        val chooser = Intent.createChooser(shareIntent, "Bagikan / Simpan CSV Laporan Harian")
+        chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(chooser)
+    }
+
+    fun printDailyReportsSummary(
+        context: Context,
+        workspaceName: String,
+        monthLabel: String,
+        year: Int,
+        reports: List<com.example.model.DailyReport>
+    ): Result<Unit> = runCatching {
+        val totalPhotos = reports.sumOf { it.photos.size }
+        val uniqueDays = reports.map { it.eventDate }.distinct().size
+        val uniqueMembers = reports.map { it.memberName.trim() }.filter { it.isNotBlank() }.distinct().size
+
+        val cardsHtml = if (reports.isEmpty()) {
+            "<p style='text-align:center;color:#64748b;'>Belum ada laporan harian untuk bulan $monthLabel $year.</p>"
+        } else {
+            reports.mapIndexed { idx, r ->
+                val fullDate = com.example.model.formatIndonesianFullDate(r.eventDate, r.dayName)
+                val photosHtml = if (r.photos.isEmpty()) {
+                    "<div class='muted'>Tidak ada lampiran foto</div>"
+                } else {
+                    val imgs = r.photos.take(4).joinToString("") { b64 ->
+                        "<img src='data:image/jpeg;base64,$b64' class='thumb' />"
+                    }
+                    "<div class='photo-grid'>$imgs</div>"
+                }
+                val locHtml = if (r.location.isNotBlank()) {
+                    " &bull; Area: <b>${htmlEscape(r.location)}</b>"
+                } else ""
+                """
+                <div class='report-card'>
+                  <div class='card-head'>
+                    <span><b>#${idx + 1} ${htmlEscape(r.memberName)}</b>$locHtml</span>
+                    <span class='dt'>${htmlEscape(fullDate)} &bull; Jam ${htmlEscape(r.eventTime)}</span>
+                  </div>
+                  <div class='desc'>${htmlEscape(r.description).replace("\n", "<br/>")}</div>
+                  $photosHtml
+                </div>
+                """.trimIndent()
+            }.joinToString("")
+        }
+
+        val html = """
+            <!DOCTYPE html>
+            <html lang="id">
+            <head>
+              <meta charset="UTF-8" />
+              <style>
+                body { font-family: sans-serif; font-size: 9.5pt; color: #0f172a; margin: 14px; }
+                h1, h2 { margin: 0; text-transform: uppercase; }
+                h1 { font-size: 13pt; }
+                h2 { font-size: 10.5pt; margin-top: 2px; color: #334155; }
+                .summary { margin: 8px 0 12px 0; padding: 8px 10px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; font-weight: bold; font-size: 9pt; }
+                .report-card { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; page-break-inside: avoid; }
+                .card-head { display: flex; justify-content: space-between; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; margin-bottom: 6px; font-size: 9pt; }
+                .dt { color: #334155; font-weight: bold; }
+                .desc { line-height: 1.4; margin-bottom: 6px; }
+                .photo-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+                .thumb { width: 115px; height: 86px; object-fit: cover; border-radius: 4px; border: 1px solid #94a3b8; }
+                .muted { font-size: 8pt; color: #64748b; font-style: italic; }
+              </style>
+            </head>
+            <body>
+              <h1>LAPORAN HARIAN BPS &mdash; PERUMAHAN BUMI PAPAN SELARAS</h1>
+              <h2>RANGKUMAN BULAN ${htmlEscape(monthLabel)} ${year} (${htmlEscape(workspaceName)})</h2>
+              <div class="summary">
+                Total Laporan: ${reports.size} &bull; Hari Aktif: $uniqueDays Hari &bull; Total Foto Dokumentasi: $totalPhotos Foto &bull; Pelapor Aktif: $uniqueMembers Anggota
+              </div>
+              $cardsHtml
+            </body>
+            </html>
+        """.trimIndent()
+
+        val webView = WebView(context)
+        activePrintWebView = webView
+        webView.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean = false
+
+            override fun onPageFinished(view: WebView?, url: String?) {
+                val printManager = context.getSystemService(Context.PRINT_SERVICE) as? PrintManager
+                if (printManager != null && view != null) {
+                    val jobName = "Laporan Harian BPS $monthLabel $year"
+                    val adapter = view.createPrintDocumentAdapter(jobName)
+                    val attributes = PrintAttributes.Builder()
+                        .setMediaSize(PrintAttributes.MediaSize.ISO_A4.asPortrait())
+                        .build()
+                    printManager.print(jobName, adapter, attributes)
+                }
+                activePrintWebView = null
+            }
+        }
+        webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
+    }
 }

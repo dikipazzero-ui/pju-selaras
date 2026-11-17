@@ -5,12 +5,16 @@ import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentId
 import com.google.firebase.firestore.IgnoreExtraProperties
 import com.google.firebase.firestore.ServerTimestamp
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 
 const val DEFAULT_PIC_NAME = "R. MOH. GANDI / NERI WELAS ANTORO"
 const val DEFAULT_MONTH = "NOVEMBER"
 const val DEFAULT_YEAR = 2026
 const val DEFAULT_TODAY_DATE = 17
-const val DEFAULT_WORKSPACE_NAME = "Tim PJU Bumi Papan Selaras"
+const val DEFAULT_WORKSPACE_NAME = "Tim Laporan Harian BPS"
 
 val INDONESIAN_MONTHS = listOf(
     "JANUARI",
@@ -28,6 +32,15 @@ val INDONESIAN_MONTHS = listOf(
 )
 
 val AVAILABLE_YEARS = listOf(2025, 2026, 2027, 2028)
+
+val CHAT_TOPICS = listOf(
+    "Lapangan",
+    "Dokumentasi",
+    "Kendala",
+    "Koordinasi",
+    "Keamanan",
+    "Kebersihan"
+)
 
 data class PjuCluster(
     val id: Int,
@@ -236,6 +249,24 @@ data class ActivityReport(
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
 
+@Keep
+@IgnoreExtraProperties
+data class DailyReport(
+    @DocumentId val id: String = "",
+    val workspaceId: String = "",
+    val memberUids: List<String> = emptyList(),
+    val createdByUid: String = "",
+    val memberName: String = "",
+    val eventDate: String = "",
+    val eventTime: String = "",
+    val dayName: String = "",
+    val location: String = "",
+    val description: String = "",
+    val photos: List<String> = emptyList(),
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
 sealed interface UiState<out T> {
     data object Loading : UiState<Nothing>
     data class Success<T>(val data: T) : UiState<T>
@@ -245,3 +276,67 @@ sealed interface UiState<out T> {
 fun buildPeriodId(year: Int, month: String): String = "${year}_${month.uppercase()}"
 
 fun buildCellKey(clusterId: Int, slotIndex: Int, date: Int): String = "${clusterId}_${slotIndex}_${date}"
+
+fun currentIsoDate(): String = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+
+fun currentTimeHm(): String = SimpleDateFormat("HH:mm", Locale.US).format(Date())
+
+fun currentIndonesianMonth(): String {
+    val idx = Calendar.getInstance().get(Calendar.MONTH)
+    return INDONESIAN_MONTHS.getOrElse(idx) { DEFAULT_MONTH }
+}
+
+fun currentYearInt(): Int = Calendar.getInstance().get(Calendar.YEAR)
+
+fun indonesianMonthNumber(monthName: String): Int {
+    val idx = INDONESIAN_MONTHS.indexOfFirst { it.equals(monthName.trim(), ignoreCase = true) }
+    return if (idx >= 0) idx + 1 else 1
+}
+
+fun monthPrefixIso(year: Int, monthName: String): String {
+    val m = indonesianMonthNumber(monthName)
+    return String.format(Locale.US, "%04d-%02d-", year, m)
+}
+
+fun indonesianDayNameFromIsoDate(isoDate: String): String {
+    return try {
+        val parts = isoDate.split("-")
+        if (parts.size != 3) return ""
+        val cal = Calendar.getInstance().apply {
+            set(Calendar.YEAR, parts[0].toInt())
+            set(Calendar.MONTH, parts[1].toInt() - 1)
+            set(Calendar.DAY_OF_MONTH, parts[2].toInt())
+        }
+        when (cal.get(Calendar.DAY_OF_WEEK)) {
+            Calendar.SUNDAY -> "Minggu"
+            Calendar.MONDAY -> "Senin"
+            Calendar.TUESDAY -> "Selasa"
+            Calendar.WEDNESDAY -> "Rabu"
+            Calendar.THURSDAY -> "Kamis"
+            Calendar.FRIDAY -> "Jumat"
+            Calendar.SATURDAY -> "Sabtu"
+            else -> ""
+        }
+    } catch (_: Exception) {
+        ""
+    }
+}
+
+fun formatIndonesianFullDate(isoDate: String, dayName: String = ""): String {
+    val parts = isoDate.split("-")
+    val monthNames = listOf(
+        "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+        "Juli", "Agustus", "September", "Oktober", "November", "Desember"
+    )
+    val resolvedDay = dayName.ifBlank { indonesianDayNameFromIsoDate(isoDate) }
+    val dateLabel = if (parts.size == 3) {
+        val y = parts[0]
+        val mIdx = parts[1].toIntOrNull()?.minus(1) ?: -1
+        val d = parts[2].toIntOrNull() ?: 0
+        val mLabel = monthNames.getOrNull(mIdx) ?: parts[1]
+        if (d > 0) "$d $mLabel $y" else isoDate
+    } else {
+        isoDate
+    }
+    return if (resolvedDay.isNotBlank()) "$resolvedDay, $dateLabel" else dateLabel
+}

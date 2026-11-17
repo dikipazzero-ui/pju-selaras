@@ -21,10 +21,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Forum
-import androidx.compose.material.icons.filled.Groups
-import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -93,7 +92,6 @@ fun AuthScreen(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
-        // User-provided Perumahan Bumi Papan Selaras roundabout background photo
         Image(
             painter = painterResource(id = R.drawable.bg_bps_roundabout),
             contentDescription = "Gerbang Bundaran Perumahan Bumi Papan Selaras",
@@ -101,7 +99,6 @@ fun AuthScreen(
             modifier = Modifier.fillMaxSize()
         )
 
-        // Atmospheric translucent scrim keeping monument visible and text sharp
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -144,8 +141,8 @@ fun AuthScreen(
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            imageVector = Icons.Filled.Lightbulb,
-                            contentDescription = "Ikon Lampu PJU",
+                            imageVector = Icons.Filled.PhotoLibrary,
+                            contentDescription = "Ikon Laporan Harian BPS",
                             tint = Slate950,
                             modifier = Modifier.size(34.dp)
                         )
@@ -156,7 +153,7 @@ fun AuthScreen(
             Spacer(modifier = Modifier.height(18.dp))
 
             Text(
-                text = "PJU BPS",
+                text = "LAPORAN HARIAN BPS",
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.ExtraBold,
                 color = Color.White,
@@ -184,22 +181,22 @@ fun AuthScreen(
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     FeatureHighlightRow(
-                        icon = Icons.Filled.CheckCircle,
+                        icon = Icons.Filled.PhotoLibrary,
                         tint = Emerald600,
-                        title = "Checklist PJU 9 Cluster",
-                        subtitle = "Catat status Menyala (✔), Redup (⚠), atau Mati (✖) per tanggal."
+                        title = "Laporan Harian + 4 Foto",
+                        subtitle = "Catat keterangan pelaporan harian lengkap dengan hari, tanggal, jam, serta hingga 4 foto dokumentasi."
                     )
                     FeatureHighlightRow(
-                        icon = Icons.Filled.Groups,
+                        icon = Icons.Filled.CalendarMonth,
                         tint = Blue600,
-                        title = "Pakai Bersama Online",
-                        subtitle = "Gabung satu tim dengan Kode Tim agar seluruh anggota melihat update real-time."
+                        title = "Perangkuman Tiap Bulan",
+                        subtitle = "Rekap otomatis per bulan & per anggota, siap salin ke WhatsApp, Export CSV, dan Cetak PDF."
                     )
                     FeatureHighlightRow(
                         icon = Icons.Filled.Forum,
                         tint = Amber500,
-                        title = "Live Chat Koordinasi",
-                        subtitle = "Diskusi langsung antar petugas & pengurus lengkap dengan tag cluster."
+                        title = "Live Chat Foto & Voice Note",
+                        subtitle = "Koordinasi tim online real-time dengan foto profil, kirim gambar, dan pesan suara."
                     )
                 }
             }
@@ -285,7 +282,7 @@ fun AuthScreen(
             Spacer(modifier = Modifier.height(12.dp))
 
             Text(
-                text = "Sinkronisasi data internet aman dengan akun Google Anda.",
+                text = "Data laporan, foto, dan live chat tersinkron online via akun Google Anda.",
                 style = MaterialTheme.typography.bodySmall,
                 color = Color.White.copy(alpha = 0.78f),
                 textAlign = TextAlign.Center

@@ -108,8 +108,8 @@ import com.example.media.ProfilePhotoHelper
 import com.example.media.VoiceNotePlayer
 import com.example.media.VoiceNoteRecorder
 import com.example.media.formatDurationSeconds
+import com.example.model.CHAT_TOPICS
 import com.example.model.ChatMessage
-import com.example.model.PJU_CLUSTERS
 import com.example.model.TeamWorkspace
 import com.example.model.UiState
 import com.example.model.UserProfile
@@ -335,10 +335,10 @@ fun TeamBannerCard(
                             type = "text/plain"
                             putExtra(
                                 Intent.EXTRA_TEXT,
-                                "Gabung ke tim PJU BPS (${workspace.name}) di aplikasi PJU BPS!\nGunakan Kode Tim: ${workspace.inviteCode}"
+                                "Gabung ke tim LAPORAN HARIAN BPS (${workspace.name})!\nGunakan Kode Tim: ${workspace.inviteCode}"
                             )
                         }
-                        context.startActivity(Intent.createChooser(shareIntent, "Bagikan Kode Tim PJU BPS"))
+                        context.startActivity(Intent.createChooser(shareIntent, "Bagikan Kode Tim LAPORAN HARIAN BPS"))
                     },
                     modifier = Modifier
                         .size(44.dp)
@@ -487,7 +487,7 @@ fun LiveChatTabContent(
 
     val myDisplayName = myProfile?.displayName?.ifBlank { null }
         ?: workspace.memberNames[currentUserId]
-        ?: "Petugas PJU"
+        ?: "Anggota Tim"
     val myPhotoBase64 = myProfile?.photoBase64 ?: ""
 
     Box(
@@ -717,14 +717,14 @@ fun LiveChatTabContent(
                                 selectedLabelColor = Color.White
                             )
                         )
-                        PJU_CLUSTERS.forEach { cluster ->
-                            val selected = selectedTag == cluster.name
+                        CHAT_TOPICS.forEach { topic ->
+                            val selected = selectedTag == topic
                             FilterChip(
                                 selected = selected,
                                 onClick = {
-                                    selectedTag = if (selected) "" else cluster.name
+                                    selectedTag = if (selected) "" else topic
                                 },
-                                label = { Text(cluster.name, style = MaterialTheme.typography.labelSmall) },
+                                label = { Text(topic, style = MaterialTheme.typography.labelSmall) },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = Amber500,
                                     selectedLabelColor = Slate950
@@ -781,7 +781,7 @@ fun LiveChatTabContent(
                                 ) {
                                     Icon(
                                         imageVector = Icons.Filled.AddPhotoAlternate,
-                                        contentDescription = "Kirim foto laporan PJU",
+                                        contentDescription = "Kirim foto di chat",
                                         tint = Blue600
                                     )
                                 }
@@ -1099,7 +1099,7 @@ private fun ChatMessageBubble(
 ) {
     val timeText = remember(message.createdAt) {
         val date = message.createdAt?.toDate() ?: Date()
-        SimpleDateFormat("dd/MM HH:mm", Locale("id", "ID")).format(date)
+        SimpleDateFormat("EEE, dd MMM • HH:mm", Locale("id", "ID")).format(date)
     }
 
     val effectiveSenderName = senderProfile?.displayName?.ifBlank { null } ?: message.senderName
@@ -1197,7 +1197,7 @@ private fun ChatMessageBubble(
                             ) {
                                 Image(
                                     bitmap = photoBitmap,
-                                    contentDescription = "Foto laporan PJU dari $effectiveSenderName",
+                                    contentDescription = "Foto laporan dari $effectiveSenderName",
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier.fillMaxSize()
                                 )
@@ -1341,7 +1341,7 @@ private fun ImageViewerDialog(
                     if (bmp != null) {
                         Image(
                             bitmap = bmp,
-                            contentDescription = "Foto laporan PJU ukuran penuh",
+                            contentDescription = "Foto lampiran ukuran penuh",
                             contentScale = ContentScale.Fit,
                             modifier = Modifier.fillMaxSize()
                         )

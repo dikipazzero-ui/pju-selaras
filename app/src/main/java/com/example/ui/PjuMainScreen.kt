@@ -1,38 +1,31 @@
-package com.example.ui
-
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
-import androidx.compose.material.icons.filled.Checklist
-import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.Assignment
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Groups
-import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Print
-import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.TableView
-import androidx.compose.material.icons.outlined.Checklist
+import androidx.compose.material.icons.outlined.Assignment
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -81,30 +74,18 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
 import com.example.auth.signOut
 import com.example.export.CsvAndPrintHelper
-import com.example.model.PjuCluster
 import com.example.model.UiState
-import com.example.ui.components.AddIssueDialog
-import com.example.ui.components.ChecklistMatrixTable
-import com.example.ui.components.DashboardStatsSection
-import com.example.ui.components.FormHeaderAndFiltersCard
-import com.example.ui.components.IssuesAndNotesCard
-import androidx.compose.material.icons.filled.AccountCircle
-import androidx.compose.material.icons.filled.Assignment
-import androidx.compose.material.icons.outlined.Assignment
-import com.example.ui.components.ActivityReportsTabContent
+import com.example.model.monthPrefixIso
+import com.example.ui.components.DailyReportsTabContent
 import com.example.ui.components.LiveChatTabContent
 import com.example.ui.components.MemberAvatar
+import com.example.ui.components.MonthlySummaryTabContent
 import com.example.ui.components.ProfilePhotoDialog
-import com.example.ui.components.ResetPeriodDialog
-import com.example.ui.components.RulesAndPicCard
-import com.example.ui.components.SlotLabelsDialog
-import com.example.ui.components.TeamBannerCard
 import com.example.ui.components.TeamWorkspaceDialog
 import com.example.ui.theme.Amber100
 import com.example.ui.theme.Amber500
 import com.example.ui.theme.Amber900
 import com.example.ui.theme.Emerald600
-import com.example.ui.theme.Rose600
 import com.example.ui.theme.Slate900
 import com.example.ui.theme.Slate950
 import com.google.firebase.Firebase
@@ -122,25 +103,20 @@ fun PjuMainScreen(
     @Suppress("DEPRECATION")
     val clipboard = LocalClipboardManager.current
 
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val workspaces by viewModel.workspaces.collectAsStateWithLifecycle()
     val activeWorkspace by viewModel.activeWorkspace.collectAsStateWithLifecycle()
     val personalProfile by viewModel.personalProfile.collectAsStateWithLifecycle()
     val workspaceProfiles by viewModel.workspaceProfiles.collectAsStateWithLifecycle()
+    val dailyReportsState by viewModel.dailyReports.collectAsStateWithLifecycle()
     val chatMessagesState by viewModel.chatMessages.collectAsStateWithLifecycle()
-    val activityReportsState by viewModel.activityReports.collectAsStateWithLifecycle()
+    val selectedMonth by viewModel.selectedMonth.collectAsStateWithLifecycle()
+    val selectedYear by viewModel.selectedYear.collectAsStateWithLifecycle()
     val isSendingChat by viewModel.isSendingChat.collectAsStateWithLifecycle()
-    val generalNotesDraft by viewModel.generalNotesDraft.collectAsStateWithLifecycle()
-    val picNameDraft by viewModel.picNameDraft.collectAsStateWithLifecycle()
-    val issuePrompt by viewModel.issuePrompt.collectAsStateWithLifecycle()
     val isMutating by viewModel.isMutating.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
 
-    var selectedTab by remember { mutableIntStateOf(0) } // 0 = Checklist, 1 = Kegiatan, 2 = Live Chat
-    var showManualIssueDialog by remember { mutableStateOf(false) }
-    var editingSlotsCluster by remember { mutableStateOf<PjuCluster?>(null) }
-    var showResetDialog by remember { mutableStateOf(false) }
+    var selectedTab by remember { mutableIntStateOf(0) } // 0 = Harian, 1 = Rangkuman, 2 = Live Chat
     var showTeamDialog by remember { mutableStateOf(false) }
     var showProfileDialog by remember { mutableStateOf(false) }
     var showOverflowMenu by remember { mutableStateOf(false) }
@@ -152,20 +128,25 @@ fun PjuMainScreen(
     }
 
     val currentFirebaseUser = Firebase.auth.currentUser
-    val currentUserEmail = currentFirebaseUser?.email ?: "Petugas PJU"
+    val currentUserEmail = currentFirebaseUser?.email ?: "Anggota BPS"
     val myProfile = workspaceProfiles[currentUserId] ?: personalProfile
     val myDisplayName = myProfile?.displayName?.ifBlank { null }
         ?: activeWorkspace?.memberNames?.get(currentUserId)?.ifBlank { null }
         ?: currentFirebaseUser?.displayName?.ifBlank { null }
         ?: currentUserEmail.substringBefore('@')
     val myPhotoBase64 = myProfile?.photoBase64 ?: ""
-    val dashboardData = (uiState as? UiState.Success)?.data
-    val activityList = (activityReportsState as? UiState.Success)?.data.orEmpty()
-    val activityCount = activityList.size
+
+    val allReports = (dailyReportsState as? UiState.Success)?.data.orEmpty()
+    val activeMonthPrefix = remember(selectedYear, selectedMonth) {
+        monthPrefixIso(selectedYear, selectedMonth)
+    }
+    val currentMonthReports = remember(allReports, activeMonthPrefix) {
+        allReports.filter { it.eventDate.startsWith(activeMonthPrefix) }
+    }
+    val dailyCount = allReports.size
     val chatCount = (chatMessagesState as? UiState.Success)?.data?.size ?: 0
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // App-wide background photo of Perumahan Bumi Papan Selaras roundabout
         Image(
             painter = painterResource(id = R.drawable.bg_bps_roundabout),
             contentDescription = null,
@@ -173,7 +154,6 @@ fun PjuMainScreen(
             modifier = Modifier.fillMaxSize()
         )
 
-        // Balanced scrim so the roundabout photo shines through while cards & text stay crisp
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -212,7 +192,7 @@ fun PjuMainScreen(
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
-                                        imageVector = Icons.Filled.Lightbulb,
+                                        imageVector = Icons.Filled.Assignment,
                                         contentDescription = null,
                                         tint = Slate950,
                                         modifier = Modifier.size(20.dp)
@@ -221,7 +201,7 @@ fun PjuMainScreen(
                             }
                             Column {
                                 Text(
-                                    text = "PJU BPS",
+                                    text = "LAPORAN HARIAN BPS",
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.ExtraBold,
                                     color = Color.White,
@@ -266,33 +246,20 @@ fun PjuMainScreen(
 
                         IconButton(
                             onClick = {
-                                if (selectedTab == 1) {
-                                    val ws = activeWorkspace
-                                    if (ws != null) {
-                                        CsvAndPrintHelper.shareActivitiesCsv(
-                                            context = context,
-                                            workspaceName = ws.name,
-                                            reports = activityList,
-                                            filterLabel = "Semua Data"
-                                        ).onFailure {
-                                            viewModel.showMessage(it.localizedMessage ?: "Gagal membuat file CSV kegiatan")
-                                        }
-                                    }
-                                } else {
-                                    val data = dashboardData
-                                    if (data != null) {
-                                        CsvAndPrintHelper.shareCsv(
-                                            context = context,
-                                            period = data.period,
-                                            issues = data.issues,
-                                            rangePreset = data.selection.rangePreset
-                                        ).onFailure {
-                                            viewModel.showMessage(it.localizedMessage ?: "Gagal membuat file CSV")
-                                        }
+                                val ws = activeWorkspace
+                                if (ws != null) {
+                                    CsvAndPrintHelper.shareDailyReportsCsv(
+                                        context = context,
+                                        workspaceName = ws.name,
+                                        monthLabel = selectedMonth,
+                                        year = selectedYear,
+                                        reports = currentMonthReports
+                                    ).onFailure {
+                                        viewModel.showMessage(it.localizedMessage ?: "Gagal membuat file CSV")
                                     }
                                 }
                             },
-                            enabled = if (selectedTab == 1) activeWorkspace != null else dashboardData != null,
+                            enabled = activeWorkspace != null,
                             modifier = Modifier.testTag("export_csv_button")
                         ) {
                             Icon(
@@ -304,38 +271,25 @@ fun PjuMainScreen(
 
                         IconButton(
                             onClick = {
-                                if (selectedTab == 1) {
-                                    val ws = activeWorkspace
-                                    if (ws != null) {
-                                        CsvAndPrintHelper.printActivitySummary(
-                                            context = context,
-                                            workspaceName = ws.name,
-                                            reports = activityList,
-                                            filterLabel = "Semua Data"
-                                        ).onFailure {
-                                            viewModel.showMessage(it.localizedMessage ?: "Gagal membuka dialog cetak kegiatan")
-                                        }
-                                    }
-                                } else {
-                                    val data = dashboardData
-                                    if (data != null) {
-                                        CsvAndPrintHelper.printChecklistForm(
-                                            context = context,
-                                            period = data.period,
-                                            issues = data.issues,
-                                            rangePreset = data.selection.rangePreset
-                                        ).onFailure {
-                                            viewModel.showMessage(it.localizedMessage ?: "Gagal membuka dialog cetak")
-                                        }
+                                val ws = activeWorkspace
+                                if (ws != null) {
+                                    CsvAndPrintHelper.printDailyReportsSummary(
+                                        context = context,
+                                        workspaceName = ws.name,
+                                        monthLabel = selectedMonth,
+                                        year = selectedYear,
+                                        reports = currentMonthReports
+                                    ).onFailure {
+                                        viewModel.showMessage(it.localizedMessage ?: "Gagal membuka cetak PDF")
                                     }
                                 }
                             },
-                            enabled = if (selectedTab == 1) activeWorkspace != null else dashboardData != null,
+                            enabled = activeWorkspace != null,
                             modifier = Modifier.testTag("print_form_button")
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.Print,
-                                contentDescription = "Cetak Form"
+                                contentDescription = "Cetak Rangkuman PDF"
                             )
                         }
 
@@ -401,20 +355,6 @@ fun PjuMainScreen(
                                     )
                                 }
                                 DropdownMenuItem(
-                                    text = { Text("Reset Data Periode Ini", color = Rose600) },
-                                    leadingIcon = {
-                                        Icon(
-                                            imageVector = Icons.Filled.RestartAlt,
-                                            contentDescription = null,
-                                            tint = Rose600
-                                        )
-                                    },
-                                    onClick = {
-                                        showOverflowMenu = false
-                                        showResetDialog = true
-                                    }
-                                )
-                                DropdownMenuItem(
                                     text = { Text("Keluar Akun Google") },
                                     leadingIcon = {
                                         Icon(
@@ -442,44 +382,25 @@ fun PjuMainScreen(
                         selected = selectedTab == 0,
                         onClick = { selectedTab = 0 },
                         icon = {
-                            Icon(
-                                imageVector = if (selectedTab == 0) Icons.Filled.Checklist else Icons.Outlined.Checklist,
-                                contentDescription = "Checklist PJU"
-                            )
-                        },
-                        label = { Text("Checklist", fontWeight = FontWeight.SemiBold, maxLines = 1) },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = Slate950,
-                            selectedTextColor = Amber500,
-                            indicatorColor = Amber500,
-                            unselectedIconColor = Color.White.copy(alpha = 0.7f),
-                            unselectedTextColor = Color.White.copy(alpha = 0.7f)
-                        ),
-                        modifier = Modifier.testTag("nav_checklist_tab")
-                    )
-                    NavigationBarItem(
-                        selected = selectedTab == 1,
-                        onClick = { selectedTab = 1 },
-                        icon = {
                             BadgedBox(
                                 badge = {
-                                    if (activityCount > 0) {
+                                    if (dailyCount > 0) {
                                         Badge(
                                             containerColor = Amber100,
                                             contentColor = Amber900
                                         ) {
-                                            Text(activityCount.coerceAtMost(99).toString())
+                                            Text(dailyCount.coerceAtMost(99).toString())
                                         }
                                     }
                                 }
                             ) {
                                 Icon(
-                                    imageVector = if (selectedTab == 1) Icons.Filled.Assignment else Icons.Outlined.Assignment,
-                                    contentDescription = "Kegiatan & Kejadian"
+                                    imageVector = if (selectedTab == 0) Icons.Filled.Assignment else Icons.Outlined.Assignment,
+                                    contentDescription = "Laporan Harian"
                                 )
                             }
                         },
-                        label = { Text("Kegiatan", fontWeight = FontWeight.SemiBold, maxLines = 1) },
+                        label = { Text("Harian", fontWeight = FontWeight.SemiBold, maxLines = 1) },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = Slate950,
                             selectedTextColor = Amber500,
@@ -487,7 +408,26 @@ fun PjuMainScreen(
                             unselectedIconColor = Color.White.copy(alpha = 0.7f),
                             unselectedTextColor = Color.White.copy(alpha = 0.7f)
                         ),
-                        modifier = Modifier.testTag("nav_activities_tab")
+                        modifier = Modifier.testTag("nav_daily_reports_tab")
+                    )
+                    NavigationBarItem(
+                        selected = selectedTab == 1,
+                        onClick = { selectedTab = 1 },
+                        icon = {
+                            Icon(
+                                imageVector = if (selectedTab == 1) Icons.Filled.CalendarMonth else Icons.Outlined.CalendarMonth,
+                                contentDescription = "Rangkuman Bulanan"
+                            )
+                        },
+                        label = { Text("Rangkuman", fontWeight = FontWeight.SemiBold, maxLines = 1) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = Slate950,
+                            selectedTextColor = Amber500,
+                            indicatorColor = Amber500,
+                            unselectedIconColor = Color.White.copy(alpha = 0.7f),
+                            unselectedTextColor = Color.White.copy(alpha = 0.7f)
+                        ),
+                        modifier = Modifier.testTag("nav_monthly_summary_tab")
                     )
                     NavigationBarItem(
                         selected = selectedTab == 2,
@@ -537,63 +477,79 @@ fun PjuMainScreen(
                     )
                 }
 
-                if (selectedTab == 1) {
-                    val ws = activeWorkspace
-                    if (ws == null) {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
+                val ws = activeWorkspace
+                if (ws == null) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
                         ) {
-                            Surface(
-                                shape = RoundedCornerShape(16.dp),
-                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
+                            Column(
+                                modifier = Modifier.padding(24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                Column(
-                                    modifier = Modifier.padding(24.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    CircularProgressIndicator()
-                                    Text("Menyiapkan laporan kegiatan...")
-                                }
+                                CircularProgressIndicator()
+                                Text(
+                                    text = "Menyiapkan ruang online LAPORAN HARIAN BPS...",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
-                    } else {
-                        ActivityReportsTabContent(
+                    }
+                } else {
+                    when (selectedTab) {
+                        0 -> DailyReportsTabContent(
                             workspace = ws,
-                            reportsState = activityReportsState,
+                            workspacesCount = workspaces.size,
+                            reportsState = dailyReportsState,
                             profilesMap = workspaceProfiles,
                             currentUserId = currentUserId,
                             myDisplayName = myDisplayName,
-                            onAddReport = viewModel::addActivityReport,
-                            onCycleStatus = viewModel::cycleActivityReportStatus,
-                            onDeleteReport = viewModel::deleteActivityReport,
+                            onOpenTeamDialog = { showTeamDialog = true },
+                            onSaveReport = viewModel::saveDailyReport,
+                            onDeleteReport = viewModel::deleteDailyReport,
                             onShowMessage = viewModel::showMessage
                         )
-                    }
-                } else if (selectedTab == 2) {
-                    val ws = activeWorkspace
-                    if (ws == null) {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Surface(
-                                shape = RoundedCornerShape(16.dp),
-                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(24.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    CircularProgressIndicator()
-                                    Text("Menyiapkan ruang chat online...")
+
+                        1 -> MonthlySummaryTabContent(
+                            workspace = ws,
+                            reportsState = dailyReportsState,
+                            profilesMap = workspaceProfiles,
+                            selectedMonth = selectedMonth,
+                            selectedYear = selectedYear,
+                            onSelectMonth = viewModel::selectMonth,
+                            onSelectYear = viewModel::selectYear,
+                            onExportCsv = { filteredReports ->
+                                CsvAndPrintHelper.shareDailyReportsCsv(
+                                    context = context,
+                                    workspaceName = ws.name,
+                                    monthLabel = selectedMonth,
+                                    year = selectedYear,
+                                    reports = filteredReports
+                                ).onFailure {
+                                    viewModel.showMessage(it.localizedMessage ?: "Gagal membuat file CSV")
                                 }
-                            }
-                        }
-                    } else {
-                        LiveChatTabContent(
+                            },
+                            onPrintPdf = { filteredReports ->
+                                CsvAndPrintHelper.printDailyReportsSummary(
+                                    context = context,
+                                    workspaceName = ws.name,
+                                    monthLabel = selectedMonth,
+                                    year = selectedYear,
+                                    reports = filteredReports
+                                ).onFailure {
+                                    viewModel.showMessage(it.localizedMessage ?: "Gagal membuka cetak PDF")
+                                }
+                            },
+                            onShowMessage = viewModel::showMessage
+                        )
+
+                        else -> LiveChatTabContent(
                             workspace = ws,
                             messagesState = chatMessagesState,
                             profilesMap = workspaceProfiles,
@@ -608,199 +564,6 @@ fun PjuMainScreen(
                             onOpenProfileDialog = { showProfileDialog = true },
                             onShowMessage = viewModel::showMessage
                         )
-                    }
-                } else {
-                    when (val state = uiState) {
-                        is UiState.Loading -> {
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Surface(
-                                    shape = RoundedCornerShape(16.dp),
-                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(24.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                                    ) {
-                                        CircularProgressIndicator()
-                                        Text(
-                                            text = "Menyiapkan data online bersama...",
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        is UiState.Error -> {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(24.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Surface(
-                                    shape = RoundedCornerShape(16.dp),
-                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f)
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(24.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Filled.CloudOff,
-                                            contentDescription = null,
-                                            tint = Rose600,
-                                            modifier = Modifier.size(48.dp)
-                                        )
-                                        Text(
-                                            text = "Gagal Memuat Data",
-                                            style = MaterialTheme.typography.titleMedium,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Text(
-                                            text = state.message,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        is UiState.Success -> {
-                            val data = state.data
-                            BoxWithConstraints(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.TopCenter
-                            ) {
-                                val isWideScreen = maxWidth >= 600.dp
-                                LazyColumn(
-                                    modifier = Modifier
-                                        .widthIn(max = 1100.dp)
-                                        .fillMaxSize(),
-                                    contentPadding = PaddingValues(
-                                        horizontal = if (isWideScreen) 20.dp else 12.dp,
-                                        vertical = 14.dp
-                                    ),
-                                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                                ) {
-                                    item(key = "team_banner") {
-                                        TeamBannerCard(
-                                            workspace = data.workspace,
-                                            workspacesCount = workspaces.size,
-                                            onOpenTeamDialog = { showTeamDialog = true },
-                                            onCopyMessage = viewModel::showMessage
-                                        )
-                                    }
-
-                                    item(key = "stats") {
-                                        DashboardStatsSection(
-                                            stats = data.stats,
-                                            isWideScreen = isWideScreen
-                                        )
-                                    }
-
-                                    item(key = "header_filters") {
-                                        FormHeaderAndFiltersCard(
-                                            selection = data.selection,
-                                            isWideScreen = isWideScreen,
-                                            onSelectMonth = viewModel::selectMonth,
-                                            onSelectYear = viewModel::selectYear,
-                                            onSelectRange = viewModel::selectRange,
-                                            onSelectTodayDate = viewModel::selectTodayDate
-                                        )
-                                    }
-
-                                    item(key = "matrix_table") {
-                                        ChecklistMatrixTable(
-                                            period = data.period,
-                                            rangePreset = data.selection.rangePreset,
-                                            todayDate = data.selection.todayDate,
-                                            overdueClusterIds = data.stats.overdueClusterIds,
-                                            isWideScreen = isWideScreen,
-                                            onCellClick = { cluster, slotIndex, day ->
-                                                viewModel.toggleCellStatus(cluster, slotIndex, day, data.period)
-                                            },
-                                            onEditSlotLabels = { cluster ->
-                                                editingSlotsCluster = cluster
-                                            }
-                                        )
-                                    }
-
-                                    item(key = "issues_and_notes") {
-                                        IssuesAndNotesCard(
-                                            month = data.selection.month,
-                                            issues = data.issues,
-                                            generalNotes = generalNotesDraft,
-                                            onNotesChanged = viewModel::onGeneralNotesChanged,
-                                            onAddIssueClick = { showManualIssueDialog = true },
-                                            onCycleIssueStatus = viewModel::cycleIssueStatus,
-                                            onDeleteIssue = viewModel::deleteIssue
-                                        )
-                                    }
-
-                                    item(key = "rules_and_pic") {
-                                        RulesAndPicCard(
-                                            picName = picNameDraft,
-                                            isWideScreen = isWideScreen,
-                                            onPicNameChanged = viewModel::onPicNameChanged
-                                        )
-                                    }
-
-                                    item(key = "bottom_spacer") {
-                                        Spacer(modifier = Modifier.height(16.dp))
-                                    }
-                                }
-                            }
-
-                            val activePrefill = issuePrompt
-                            if (showManualIssueDialog || activePrefill != null) {
-                                AddIssueDialog(
-                                    initialDay = data.selection.todayDate,
-                                    prefill = activePrefill,
-                                    onDismiss = {
-                                        showManualIssueDialog = false
-                                        viewModel.dismissIssuePrompt()
-                                    },
-                                    onSubmit = { date, cluster, unit, desc, status ->
-                                        viewModel.addIssue(date, cluster, unit, desc, status)
-                                        showManualIssueDialog = false
-                                        viewModel.dismissIssuePrompt()
-                                    }
-                                )
-                            }
-
-                            editingSlotsCluster?.let { cluster ->
-                                val existing = data.period.slotLabels[cluster.id.toString()].orEmpty()
-                                SlotLabelsDialog(
-                                    cluster = cluster,
-                                    existingLabels = existing,
-                                    onDismiss = { editingSlotsCluster = null },
-                                    onSave = { labels ->
-                                        viewModel.saveSlotLabels(cluster.id, labels)
-                                        editingSlotsCluster = null
-                                    }
-                                )
-                            }
-
-                            if (showResetDialog) {
-                                ResetPeriodDialog(
-                                    month = data.selection.month,
-                                    year = data.selection.year,
-                                    onDismiss = { showResetDialog = false },
-                                    onConfirm = {
-                                        showResetDialog = false
-                                        viewModel.resetCurrentPeriod()
-                                    }
-                                )
-                            }
-                        }
                     }
                 }
 

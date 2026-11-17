@@ -1,11 +1,9 @@
 <resources>
-    <string name="app_name">PJU BPS</string>
+    <string name="app_name">LAPORAN HARIAN BPS</string>
     <string name="residential_title">PERUMAHAN BUMI PAPAN SELARAS</string>
-    <string name="form_title">FORM CHECKLIST PENERANGAN JALAN UMUM</string>
+    <string name="form_title">LAPORAN HARIAN &amp; RANGKUMAN BULANAN</string>
     <string name="sign_in_with_google">Masuk dengan Google</string>
     <string name="sign_out">Keluar</string>
     <string name="export_csv">Export CSV</string>
-    <string name="print_form">Cetak Form</string>
-    <string name="reset_period">Reset</string>
-    <string name="add_issue_report">Tambah Laporan Masalah</string>
+    <string name="print_form">Cetak Rekap</string>
 </resources>

@@ -340,6 +340,26 @@
       },
       "required": ["workspaceId", "memberUids", "createdByUid", "memberName", "reportType", "eventDate", "eventTime", "location", "description", "status", "photoBase64", "createdAt", "updatedAt"]
     },
+    "DailyReport": {
+      "title": "DailyReport",
+      "description": "Daily operational report with day name, date, time, member name, description, and up to 4 base64 JPEG documentation photos.",
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string" },
+        "memberUids": { "type": "array" },
+        "createdByUid": { "type": "string" },
+        "memberName": { "type": "string" },
+        "eventDate": { "type": "string", "description": "YYYY-MM-DD" },
+        "eventTime": { "type": "string", "description": "HH:mm" },
+        "dayName": { "type": "string", "description": "Indonesian day name (Senin..Minggu)" },
+        "location": { "type": "string" },
+        "description": { "type": "string" },
+        "photos": { "type": "array", "description": "List of up to 4 compressed JPEG base64 strings." },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["workspaceId", "memberUids", "createdByUid", "memberName", "eventDate", "eventTime", "dayName", "location", "description", "photos", "createdAt", "updatedAt"]
+    },
     "ChecklistPeriod": {
       "title": "ChecklistPeriod",
       "description": "Legacy personal monthly PJU inspection checklist sheet.",
@@ -404,6 +424,10 @@
     "/workspaces/{workspaceId}/activities/{activityId}": {
       "schema": { "$ref": "#/entities/ActivityReport" },
       "description": "Team activity logs and incident reports with member name, date, and time."
+    },
+    "/workspaces/{workspaceId}/dailyReports/{reportId}": {
+      "schema": { "$ref": "#/entities/DailyReport" },
+      "description": "Daily team reports with day/date/time, description, and up to 4 embedded photos."
     },
     "/users/{userId}/profile/{docId}": {
       "schema": { "$ref": "#/entities/UserProfile" },

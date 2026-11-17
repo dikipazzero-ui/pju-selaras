@@ -287,4 +287,53 @@ test("Shared checklist period, issue creation, and live chat messages work for m
     charlieDb.collection("workspaces").doc("ws_bps").collection("activities")
       .where("memberUids", "array-contains", BOB_UID).get()
   );
+
+  // Alice creates a DailyReport with 4 photos; Bob reads and edits; >4 photos and non-member access fail
+  const samplePhoto = "/9j/4AAQSkZJRgABAQAAAQABAAD/";
+  await assertSucceeds(
+    aliceDb.collection("workspaces").doc("ws_bps").collection("dailyReports").doc("dr_1").set({
+      workspaceId: "ws_bps",
+      memberUids: [ALICE_UID, BOB_UID],
+      createdByUid: ALICE_UID,
+      memberName: "Alice",
+      eventDate: "2026-11-17",
+      eventTime: "08:45",
+      dayName: "Selasa",
+      location: "Gerbang Utama",
+      description: "Monitoring kebersihan dan penerangan pagi.",
+      photos: [samplePhoto, samplePhoto, samplePhoto, samplePhoto],
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+  await assertFails(
+    aliceDb.collection("workspaces").doc("ws_bps").collection("dailyReports").doc("dr_too_many").set({
+      workspaceId: "ws_bps",
+      memberUids: [ALICE_UID, BOB_UID],
+      createdByUid: ALICE_UID,
+      memberName: "Alice",
+      eventDate: "2026-11-17",
+      eventTime: "09:00",
+      dayName: "Selasa",
+      location: "Area A",
+      description: "5 foto harus ditolak",
+      photos: [samplePhoto, samplePhoto, samplePhoto, samplePhoto, samplePhoto],
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+  await assertSucceeds(
+    bobDb.collection("workspaces").doc("ws_bps").collection("dailyReports")
+      .where("memberUids", "array-contains", BOB_UID).get()
+  );
+  await assertSucceeds(
+    bobDb.collection("workspaces").doc("ws_bps").collection("dailyReports").doc("dr_1").update({
+      description: "Monitoring selesai dan aman.",
+      updatedAt: new Date(Date.now() - 500),
+    })
+  );
+  await assertFails(
+    charlieDb.collection("workspaces").doc("ws_bps").collection("dailyReports")
+      .where("memberUids", "array-contains", BOB_UID).get()
+  );
 });

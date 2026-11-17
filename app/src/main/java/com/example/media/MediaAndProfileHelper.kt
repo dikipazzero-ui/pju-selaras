@@ -164,6 +164,45 @@ object ChatPhotoHelper {
             }
         }
 
+    suspend fun encodeDailySlotUriToBase64(context: Context, uri: Uri): Result<String> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val maxDim = 760
+                val maxLen = 155_000
+                val decoded = decodeSampledBitmap(context, uri, maxDim)
+                    ?: throw IllegalStateException("Gagal membaca gambar.")
+                val largest = max(decoded.width, decoded.height)
+                val scaled = if (largest > maxDim) {
+                    val ratio = maxDim.toFloat() / largest.toFloat()
+                    Bitmap.createScaledBitmap(
+                        decoded,
+                        max(1, (decoded.width * ratio).toInt()),
+                        max(1, (decoded.height * ratio).toInt()),
+                        true
+                    )
+                } else {
+                    decoded
+                }
+
+                var encoded = ""
+                for (quality in intArrayOf(72, 58, 46, 36, 28)) {
+                    val out = ByteArrayOutputStream()
+                    scaled.compress(Bitmap.CompressFormat.JPEG, quality, out)
+                    val candidate = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+                    encoded = candidate
+                    if (candidate.length <= maxLen) break
+                }
+
+                if (scaled !== decoded) scaled.recycle()
+                decoded.recycle()
+
+                require(encoded.isNotBlank() && encoded.length <= maxLen) {
+                    "Ukuran foto terlalu besar untuk slot 4 foto. Pilih foto lain."
+                }
+                encoded
+            }
+        }
+
     private fun decodeSampledBitmap(context: Context, uri: Uri, maxDim: Int): Bitmap? {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             val source = ImageDecoder.createSource(context.contentResolver, uri)

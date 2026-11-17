@@ -12,6 +12,7 @@ import com.example.model.DEFAULT_MONTH
 import com.example.model.DEFAULT_PIC_NAME
 import com.example.model.DEFAULT_WORKSPACE_NAME
 import com.example.model.DEFAULT_YEAR
+import com.example.model.DailyReport
 import com.example.model.IssueStatus
 import com.example.model.LampStatus
 import com.example.model.PjuIssue
@@ -19,6 +20,7 @@ import com.example.model.TeamWorkspace
 import com.example.model.UserProfile
 import com.example.model.buildCellKey
 import com.example.model.buildPeriodId
+import com.example.model.indonesianDayNameFromIsoDate
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.auth
@@ -79,6 +81,9 @@ class PjuChecklistRepository(
 
     private fun activitiesCollection(workspaceId: String) =
         workspaceRef(workspaceId).collection("activities")
+
+    private fun dailyReportsCollection(workspaceId: String) =
+        workspaceRef(workspaceId).collection("dailyReports")
 
     private fun personalProfileDoc(uid: String) =
         db.collection("users").document(uid).collection("profile").document("main")
@@ -343,7 +348,8 @@ class PjuChecklistRepository(
         issues: List<PjuIssue>,
         messages: List<ChatMessage>,
         profiles: List<UserProfile> = emptyList(),
-        activities: List<ActivityReport> = emptyList()
+        activities: List<ActivityReport> = emptyList(),
+        dailyReports: List<DailyReport> = emptyList()
     ) {
         val uid = auth.currentUser?.uid ?: return
         val targetMembers = workspace.memberUids
@@ -366,8 +372,11 @@ class PjuChecklistRepository(
         val outdatedActivities = activities.filter {
             it.id.isNotBlank() && uid in it.memberUids && !it.memberUids.containsAll(targetMembers)
         }
+        val outdatedDaily = dailyReports.filter {
+            it.id.isNotBlank() && uid in it.memberUids && !it.memberUids.containsAll(targetMembers)
+        }
 
-        if (!missingOnPeriod && outdatedIssues.isEmpty() && outdatedMessages.isEmpty() && outdatedProfiles.isEmpty() && outdatedActivities.isEmpty()) return
+        if (!missingOnPeriod && outdatedIssues.isEmpty() && outdatedMessages.isEmpty() && outdatedProfiles.isEmpty() && outdatedActivities.isEmpty() && outdatedDaily.isEmpty()) return
 
         try {
             val batch = db.batch()
@@ -421,6 +430,17 @@ class PjuChecklistRepository(
                 if (ops >= 450) break
                 batch.update(
                     activitiesCollection(workspace.id).document(act.id),
+                    mapOf(
+                        "memberUids" to targetMembers,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+                ops++
+            }
+            for (rep in outdatedDaily) {
+                if (ops >= 450) break
+                batch.update(
+                    dailyReportsCollection(workspace.id).document(rep.id),
                     mapOf(
                         "memberUids" to targetMembers,
                         "updatedAt" to FieldValue.serverTimestamp()
@@ -937,6 +957,135 @@ class PjuChecklistRepository(
         reportId: String
     ): Result<Unit> {
         val docRef = activitiesCollection(workspace.id).document(reportId)
+        return try {
+            requireUserId(userId)
+            require(reportId.isNotBlank()) { "ID laporan tidak boleh kosong" }
+            docRef.delete().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    fun observeDailyReports(workspace: TeamWorkspace, userId: String): Flow<List<DailyReport>> = flow {
+        val uid = requireUserId(userId)
+        val collectionRef = dailyReportsCollection(workspace.id)
+        emitAll(
+            collectionRef
+                .whereArrayContains("memberUids", uid)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(
+                        DailyReport::class.java,
+                        DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                    ).sortedWith(
+                        compareByDescending<DailyReport> { it.eventDate }
+                            .thenByDescending { it.eventTime }
+                            .thenByDescending { it.createdAt?.toDate()?.time ?: 0L }
+                    )
+                }
+                .catch { error ->
+                    val firestoreError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (firestoreError == null && error is CancellationException) throw error
+                    val exceptionToLog = firestoreError ?: (error as? Exception)
+                    if (exceptionToLog != null && auth.currentUser?.uid == uid) {
+                        handleFirestoreError(exceptionToLog, OperationType.LIST, collectionRef.path)
+                    }
+                    throw error
+                }
+        )
+    }
+
+    suspend fun saveDailyReport(
+        workspace: TeamWorkspace,
+        userId: String,
+        existingReportId: String? = null,
+        memberName: String,
+        eventDate: String,
+        eventTime: String,
+        dayName: String,
+        location: String,
+        description: String,
+        photos: List<String>
+    ): Result<Unit> {
+        val isUpdate = !existingReportId.isNullOrBlank()
+        val docRef = if (isUpdate) {
+            dailyReportsCollection(workspace.id).document(existingReportId!!)
+        } else {
+            dailyReportsCollection(workspace.id).document()
+        }
+        return try {
+            val uid = requireUserId(userId)
+            val cleanMember = memberName.trim().take(80)
+            val cleanDate = eventDate.trim()
+            val cleanTime = eventTime.trim()
+            val cleanDay = dayName.trim().ifBlank { indonesianDayNameFromIsoDate(cleanDate) }.take(20)
+            val cleanLocation = location.trim().take(100)
+            val cleanDesc = description.trim().take(2000)
+            val cleanPhotos = photos
+                .map { it.trim() }
+                .filter { it.length >= 10 && it.length <= 170_000 }
+                .take(4)
+
+            require(cleanMember.isNotBlank()) { "Nama anggota wajib diisi" }
+            require(cleanDate.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$"))) { "Format tanggal tidak valid" }
+            require(cleanTime.matches(Regex("^\\d{2}:\\d{2}$"))) { "Format jam tidak valid" }
+            require(cleanDay.length in 3..20) { "Nama hari tidak valid" }
+            require(cleanDesc.isNotBlank()) { "Keterangan pelaporan wajib diisi" }
+
+            val members = workspace.memberUids.ifEmpty { listOf(uid) }.take(50)
+            if (isUpdate) {
+                docRef.update(
+                    mapOf(
+                        "memberName" to cleanMember,
+                        "eventDate" to cleanDate,
+                        "eventTime" to cleanTime,
+                        "dayName" to cleanDay,
+                        "location" to cleanLocation,
+                        "description" to cleanDesc,
+                        "photos" to cleanPhotos,
+                        "memberUids" to members,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            } else {
+                docRef.set(
+                    mapOf(
+                        "workspaceId" to workspace.id,
+                        "memberUids" to members,
+                        "createdByUid" to uid,
+                        "memberName" to cleanMember,
+                        "eventDate" to cleanDate,
+                        "eventTime" to cleanTime,
+                        "dayName" to cleanDay,
+                        "location" to cleanLocation,
+                        "description" to cleanDesc,
+                        "photos" to cleanPhotos,
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            }
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, if (isUpdate) OperationType.UPDATE else OperationType.CREATE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteDailyReport(
+        workspace: TeamWorkspace,
+        userId: String,
+        reportId: String
+    ): Result<Unit> {
+        val docRef = dailyReportsCollection(workspace.id).document(reportId)
         return try {
             requireUserId(userId)
             require(reportId.isNotBlank()) { "ID laporan tidak boleh kosong" }
