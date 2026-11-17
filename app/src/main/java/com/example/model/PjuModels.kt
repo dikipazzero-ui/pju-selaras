@@ -164,7 +164,30 @@ data class ChatMessage(
     val senderEmail: String = "",
     val text: String = "",
     val tagCluster: String = "",
+    val messageType: String = "text",
+    val audioBase64: String = "",
+    val audioDurationSec: Long = 0L,
+    val imageBase64: String = "",
     @ServerTimestamp val createdAt: Timestamp? = null
+) {
+    val isVoiceNote: Boolean
+        get() = messageType == "voice" && audioBase64.isNotBlank()
+
+    val isImageMessage: Boolean
+        get() = messageType == "image" && imageBase64.isNotBlank()
+}
+
+@Keep
+@IgnoreExtraProperties
+data class UserProfile(
+    @DocumentId val id: String = "",
+    val workspaceId: String = "",
+    val userId: String = "",
+    val memberUids: List<String> = emptyList(),
+    val displayName: String = "",
+    val photoBase64: String = "",
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
 )
 
 sealed interface UiState<out T> {

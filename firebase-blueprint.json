@@ -257,6 +257,23 @@
           "type": "string",
           "description": "Optional cluster tag reference (empty string if none)."
         },
+        "messageType": {
+          "type": "string",
+          "enum": ["text", "voice", "image"],
+          "description": "Message payload type: 'text', 'voice', or 'image'."
+        },
+        "audioBase64": {
+          "type": "string",
+          "description": "Base64-encoded AAC audio (.m4a) for voice notes (empty string if not voice)."
+        },
+        "audioDurationSec": {
+          "type": "integer",
+          "description": "Voice note duration in seconds (0..120)."
+        },
+        "imageBase64": {
+          "type": "string",
+          "description": "Base64-encoded compressed JPEG image for photo reports (empty string if not image)."
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time",
@@ -273,6 +290,34 @@
         "tagCluster",
         "createdAt"
       ]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Personal user profile storing display name and compressed JPEG base64 avatar.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoBase64": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "displayName", "photoBase64", "createdAt", "updatedAt"]
+    },
+    "WorkspaceProfile": {
+      "title": "WorkspaceProfile",
+      "description": "Member profile inside a shared workspace so teammates see profile photos in Live Chat.",
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string" },
+        "userId": { "type": "string" },
+        "memberUids": { "type": "array" },
+        "displayName": { "type": "string" },
+        "photoBase64": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["workspaceId", "userId", "memberUids", "displayName", "photoBase64", "createdAt", "updatedAt"]
     },
     "ChecklistPeriod": {
       "title": "ChecklistPeriod",
@@ -329,7 +374,15 @@
     },
     "/workspaces/{workspaceId}/messages/{messageId}": {
       "schema": { "$ref": "#/entities/ChatMessage" },
-      "description": "Live chat messages for team coordination."
+      "description": "Live chat messages and voice notes for team coordination."
+    },
+    "/workspaces/{workspaceId}/profiles/{profileUid}": {
+      "schema": { "$ref": "#/entities/WorkspaceProfile" },
+      "description": "Shared member profile photos and display names inside workspace."
+    },
+    "/users/{userId}/profile/{docId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Personal user profile photo and display name."
     },
     "/users/{userId}/periods/{periodId}": {
       "schema": { "$ref": "#/entities/ChecklistPeriod" },

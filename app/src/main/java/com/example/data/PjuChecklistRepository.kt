@@ -2,6 +2,7 @@ package com.example.data
 
 import android.content.Context
 import com.example.R
+import com.example.media.formatDurationSeconds
 import com.example.model.ChatMessage
 import com.example.model.ChecklistPeriod
 import com.example.model.DEFAULT_MONTH
@@ -12,6 +13,7 @@ import com.example.model.IssueStatus
 import com.example.model.LampStatus
 import com.example.model.PjuIssue
 import com.example.model.TeamWorkspace
+import com.example.model.UserProfile
 import com.example.model.buildCellKey
 import com.example.model.buildPeriodId
 import com.google.firebase.Firebase
@@ -68,6 +70,12 @@ class PjuChecklistRepository(
 
     private fun messagesCollection(workspaceId: String) =
         workspaceRef(workspaceId).collection("messages")
+
+    private fun profilesCollection(workspaceId: String) =
+        workspaceRef(workspaceId).collection("profiles")
+
+    private fun personalProfileDoc(uid: String) =
+        db.collection("users").document(uid).collection("profile").document("main")
 
     private fun generateInviteCode(): String {
         val alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -327,7 +335,8 @@ class PjuChecklistRepository(
         workspace: TeamWorkspace,
         period: ChecklistPeriod?,
         issues: List<PjuIssue>,
-        messages: List<ChatMessage>
+        messages: List<ChatMessage>,
+        profiles: List<UserProfile> = emptyList()
     ) {
         val uid = auth.currentUser?.uid ?: return
         val targetMembers = workspace.memberUids
@@ -344,8 +353,11 @@ class PjuChecklistRepository(
         val outdatedMessages = messages.filter {
             it.id.isNotBlank() && uid in it.memberUids && !it.memberUids.containsAll(targetMembers)
         }
+        val outdatedProfiles = profiles.filter {
+            it.userId.isNotBlank() && uid in it.memberUids && !it.memberUids.containsAll(targetMembers)
+        }
 
-        if (!missingOnPeriod && outdatedIssues.isEmpty() && outdatedMessages.isEmpty()) return
+        if (!missingOnPeriod && outdatedIssues.isEmpty() && outdatedMessages.isEmpty() && outdatedProfiles.isEmpty()) return
 
         try {
             val batch = db.batch()
@@ -381,6 +393,17 @@ class PjuChecklistRepository(
                 batch.update(
                     messagesCollection(workspace.id).document(msg.id),
                     mapOf("memberUids" to targetMembers)
+                )
+                ops++
+            }
+            for (profile in outdatedProfiles) {
+                if (ops >= 450) break
+                batch.update(
+                    profilesCollection(workspace.id).document(profile.userId),
+                    mapOf(
+                        "memberUids" to targetMembers,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
                 )
                 ops++
             }
@@ -494,11 +517,173 @@ class PjuChecklistRepository(
         )
     }
 
+    fun observePersonalProfile(userId: String): Flow<UserProfile?> = flow {
+        val uid = requireUserId(userId)
+        val docRef = personalProfileDoc(uid)
+        emitAll(
+            docRef.snapshots()
+                .map { snapshot ->
+                    if (snapshot.exists()) {
+                        snapshot.toObject(
+                            UserProfile::class.java,
+                            DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                        )
+                    } else {
+                        null
+                    }
+                }
+                .catch { error ->
+                    val firestoreError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (firestoreError == null && error is CancellationException) throw error
+                    val exceptionToLog = firestoreError ?: (error as? Exception)
+                    if (exceptionToLog != null && auth.currentUser?.uid == uid) {
+                        handleFirestoreError(exceptionToLog, OperationType.GET, docRef.path)
+                    }
+                    throw error
+                }
+        )
+    }
+
+    fun observeWorkspaceProfiles(workspace: TeamWorkspace, userId: String): Flow<Map<String, UserProfile>> = flow {
+        val uid = requireUserId(userId)
+        val collectionRef = profilesCollection(workspace.id)
+        emitAll(
+            collectionRef
+                .whereArrayContains("memberUids", uid)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(
+                        UserProfile::class.java,
+                        DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                    ).associateBy { profile -> profile.userId.ifBlank { profile.id } }
+                }
+                .catch { error ->
+                    val firestoreError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (firestoreError == null && error is CancellationException) throw error
+                    val exceptionToLog = firestoreError ?: (error as? Exception)
+                    if (exceptionToLog != null && auth.currentUser?.uid == uid) {
+                        handleFirestoreError(exceptionToLog, OperationType.LIST, collectionRef.path)
+                    }
+                    throw error
+                }
+        )
+    }
+
+    suspend fun saveUserProfile(
+        userId: String,
+        workspaces: List<TeamWorkspace>,
+        displayName: String,
+        photoBase64: String
+    ): Result<Unit> {
+        var docPath = "users/$userId/profile/main"
+        return try {
+            val uid = requireUserId(userId)
+            val cleanName = displayName.trim().take(80).ifBlank { currentDisplayName() }
+            val cleanPhoto = photoBase64.take(120_000)
+
+            val personalRef = personalProfileDoc(uid)
+            docPath = personalRef.path
+            val personalExists = personalRef.get().await().exists()
+            if (personalExists) {
+                personalRef.update(
+                    mapOf(
+                        "displayName" to cleanName,
+                        "photoBase64" to cleanPhoto,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            } else {
+                personalRef.set(
+                    mapOf(
+                        "userId" to uid,
+                        "displayName" to cleanName,
+                        "photoBase64" to cleanPhoto,
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            }
+
+            for (ws in workspaces) {
+                val wsProfileRef = profilesCollection(ws.id).document(uid)
+                docPath = wsProfileRef.path
+                val members = ws.memberUids.ifEmpty { listOf(uid) }.take(50)
+                val wsProfileExists = wsProfileRef.get().await().exists()
+                if (wsProfileExists) {
+                    wsProfileRef.update(
+                        mapOf(
+                            "displayName" to cleanName,
+                            "photoBase64" to cleanPhoto,
+                            "memberUids" to members,
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+                } else {
+                    wsProfileRef.set(
+                        mapOf(
+                            "workspaceId" to ws.id,
+                            "userId" to uid,
+                            "memberUids" to members,
+                            "displayName" to cleanName,
+                            "photoBase64" to cleanPhoto,
+                            "createdAt" to FieldValue.serverTimestamp(),
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+                }
+            }
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, docPath)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun ensurePersonalProfileSyncedToWorkspace(
+        workspace: TeamWorkspace,
+        userId: String
+    ) {
+        val uid = auth.currentUser?.uid ?: return
+        if (uid != userId || uid !in workspace.memberUids) return
+        val wsProfileRef = profilesCollection(workspace.id).document(uid)
+        try {
+            val wsProfileSnap = wsProfileRef.get().await()
+            if (wsProfileSnap.exists()) return
+            val personalSnap = personalProfileDoc(uid).get().await()
+            if (!personalSnap.exists()) return
+            val personal = personalSnap.toObject(UserProfile::class.java) ?: return
+            if (personal.photoBase64.isBlank() && personal.displayName.isBlank()) return
+            val members = workspace.memberUids.ifEmpty { listOf(uid) }.take(50)
+            wsProfileRef.set(
+                mapOf(
+                    "workspaceId" to workspace.id,
+                    "userId" to uid,
+                    "memberUids" to members,
+                    "displayName" to personal.displayName.ifBlank { currentDisplayName() }.take(80),
+                    "photoBase64" to personal.photoBase64.take(120_000),
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, wsProfileRef.path)
+        }
+    }
+
     suspend fun sendChatMessage(
         workspace: TeamWorkspace,
         userId: String,
         text: String,
-        tagCluster: String = ""
+        tagCluster: String = "",
+        senderDisplayName: String? = null
     ): Result<Unit> {
         val collectionRef = messagesCollection(workspace.id)
         val docRef = collectionRef.document()
@@ -507,15 +692,102 @@ class PjuChecklistRepository(
             val cleanText = text.trim().take(1000)
             require(cleanText.isNotBlank()) { "Pesan tidak boleh kosong" }
             val cleanTag = tagCluster.trim().take(60)
+            val cleanSenderName = senderDisplayName?.trim()?.take(80)?.ifBlank { null } ?: currentDisplayName()
             val members = workspace.memberUids.ifEmpty { listOf(uid) }.take(50)
             val payload = mapOf(
                 "workspaceId" to workspace.id,
                 "memberUids" to members,
                 "senderId" to uid,
-                "senderName" to currentDisplayName(),
+                "senderName" to cleanSenderName,
                 "senderEmail" to currentEmail(),
                 "text" to cleanText,
                 "tagCluster" to cleanTag,
+                "messageType" to "text",
+                "audioBase64" to "",
+                "audioDurationSec" to 0L,
+                "imageBase64" to "",
+                "createdAt" to FieldValue.serverTimestamp()
+            )
+            docRef.set(payload).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun sendVoiceMessage(
+        workspace: TeamWorkspace,
+        userId: String,
+        audioBase64: String,
+        durationSec: Int,
+        tagCluster: String = "",
+        senderDisplayName: String? = null
+    ): Result<Unit> {
+        val collectionRef = messagesCollection(workspace.id)
+        val docRef = collectionRef.document()
+        return try {
+            val uid = requireUserId(userId)
+            require(audioBase64.length in 10..450_000) { "Ukuran voice note tidak valid atau melebihi batas." }
+            val safeDuration = durationSec.coerceIn(1, 120)
+            val cleanTag = tagCluster.trim().take(60)
+            val cleanSenderName = senderDisplayName?.trim()?.take(80)?.ifBlank { null } ?: currentDisplayName()
+            val members = workspace.memberUids.ifEmpty { listOf(uid) }.take(50)
+            val payload = mapOf(
+                "workspaceId" to workspace.id,
+                "memberUids" to members,
+                "senderId" to uid,
+                "senderName" to cleanSenderName,
+                "senderEmail" to currentEmail(),
+                "text" to "Pesan suara (${formatDurationSeconds(safeDuration)})",
+                "tagCluster" to cleanTag,
+                "messageType" to "voice",
+                "audioBase64" to audioBase64,
+                "audioDurationSec" to safeDuration.toLong(),
+                "imageBase64" to "",
+                "createdAt" to FieldValue.serverTimestamp()
+            )
+            docRef.set(payload).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun sendImageMessage(
+        workspace: TeamWorkspace,
+        userId: String,
+        imageBase64: String,
+        caption: String = "",
+        tagCluster: String = "",
+        senderDisplayName: String? = null
+    ): Result<Unit> {
+        val collectionRef = messagesCollection(workspace.id)
+        val docRef = collectionRef.document()
+        return try {
+            val uid = requireUserId(userId)
+            require(imageBase64.length in 10..450_000) { "Ukuran gambar tidak valid atau melebihi batas." }
+            val cleanCaption = caption.trim().take(1000).ifBlank { "Foto laporan PJU" }
+            val cleanTag = tagCluster.trim().take(60)
+            val cleanSenderName = senderDisplayName?.trim()?.take(80)?.ifBlank { null } ?: currentDisplayName()
+            val members = workspace.memberUids.ifEmpty { listOf(uid) }.take(50)
+            val payload = mapOf(
+                "workspaceId" to workspace.id,
+                "memberUids" to members,
+                "senderId" to uid,
+                "senderName" to cleanSenderName,
+                "senderEmail" to currentEmail(),
+                "text" to cleanCaption,
+                "tagCluster" to cleanTag,
+                "messageType" to "image",
+                "audioBase64" to "",
+                "audioDurationSec" to 0L,
+                "imageBase64" to imageBase64,
                 "createdAt" to FieldValue.serverTimestamp()
             )
             docRef.set(payload).await()

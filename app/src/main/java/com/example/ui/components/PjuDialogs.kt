@@ -45,6 +45,7 @@ import com.example.model.PjuCluster
 import com.example.model.TeamWorkspace
 import com.example.ui.IssueDialogPrefill
 import com.example.ui.theme.Rose600
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -383,6 +384,7 @@ fun ResetPeriodDialog(
 fun TeamWorkspaceDialog(
     activeWorkspace: TeamWorkspace,
     allWorkspaces: List<TeamWorkspace>,
+    profilesMap: Map<String, com.example.model.UserProfile> = emptyMap(),
     onSelectWorkspace: (String) -> Unit,
     onJoinWorkspace: (code: String, onDone: (Boolean) -> Unit) -> Unit,
     onCreateWorkspace: (name: String, onDone: (Boolean) -> Unit) -> Unit,
@@ -429,19 +431,35 @@ fun TeamWorkspaceDialog(
                     Text("Salin Kode Tim (${activeWorkspace.inviteCode})")
                 }
 
-                if (activeWorkspace.memberNames.isNotEmpty()) {
+                if (activeWorkspace.memberUids.isNotEmpty()) {
                     Text(
-                        text = "Anggota Terhubung (${activeWorkspace.memberNames.size}):",
+                        text = "Anggota Terhubung (${activeWorkspace.memberUids.size}):",
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.Bold
                     )
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        activeWorkspace.memberNames.values.forEachIndexed { idx, memberName ->
-                            Text(
-                                text = "${idx + 1}. $memberName",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        activeWorkspace.memberUids.forEachIndexed { idx, uid ->
+                            val profile = profilesMap[uid]
+                            val memberName = profile?.displayName?.ifBlank { null }
+                                ?: activeWorkspace.memberNames[uid]
+                                ?: "Anggota ${idx + 1}"
+                            val photoBase64 = profile?.photoBase64 ?: ""
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                MemberAvatar(
+                                    displayName = memberName,
+                                    photoBase64 = photoBase64,
+                                    size = 32.dp
+                                )
+                                Text(
+                                    text = memberName,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
                         }
                     }
                 }
@@ -566,4 +584,146 @@ fun TeamWorkspaceDialog(
         shape = RoundedCornerShape(20.dp)
     )
 }
+
+@Composable
+fun ProfilePhotoDialog(
+    initialDisplayName: String,
+    initialPhotoBase64: String,
+    onSave: (displayName: String, photoBase64: String, onDone: (Boolean) -> Unit) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+
+    var nameDraft by remember(initialDisplayName) { mutableStateOf(initialDisplayName) }
+    var photoDraft by remember(initialPhotoBase64) { mutableStateOf(initialPhotoBase64) }
+    var isProcessingImage by remember { mutableStateOf(false) }
+    var isSaving by remember { mutableStateOf(false) }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+
+    val photoPickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            isProcessingImage = true
+            errorMsg = null
+            scope.launch {
+                val encoded = com.example.media.ProfilePhotoHelper.encodeUriToBase64(context, uri)
+                isProcessingImage = false
+                encoded.onSuccess { b64 ->
+                    photoDraft = b64
+                }.onFailure { err ->
+                    errorMsg = err.localizedMessage ?: "Gagal memproses foto."
+                }
+            }
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "Profil & Foto Chat",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                MemberAvatar(
+                    displayName = nameDraft.ifBlank { "Petugas" },
+                    photoBase64 = photoDraft,
+                    size = 96.dp
+                )
+
+                Text(
+                    text = "Foto profil akan tampil di sebelah gelembung Live Chat dan daftar anggota tim agar Anda mudah dikenali.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Button(
+                    onClick = {
+                        photoPickerLauncher.launch(
+                            androidx.activity.result.PickVisualMediaRequest(
+                                androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly
+                            )
+                        )
+                    },
+                    enabled = !isProcessingImage && !isSaving,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("pick_profile_photo_button")
+                ) {
+                    Text(if (isProcessingImage) "Memproses foto..." else "Pilih Foto dari Galeri")
+                }
+
+                if (photoDraft.isNotBlank()) {
+                    androidx.compose.material3.OutlinedButton(
+                        onClick = { photoDraft = "" },
+                        enabled = !isProcessingImage && !isSaving,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Hapus Foto Profil", color = Rose600)
+                    }
+                }
+
+                OutlinedTextField(
+                    value = nameDraft,
+                    onValueChange = {
+                        nameDraft = it.take(80)
+                        errorMsg = null
+                    },
+                    label = { Text("Nama Tampilan di Chat") },
+                    placeholder = { Text("Misal: Pak Diki (Keamanan)") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("profile_display_name_input")
+                )
+
+                if (errorMsg != null) {
+                    Text(
+                        text = errorMsg ?: "",
+                        color = Rose600,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val clean = nameDraft.trim()
+                    if (clean.isEmpty()) {
+                        errorMsg = "Nama tampilan tidak boleh kosong."
+                    } else {
+                        isSaving = true
+                        onSave(clean, photoDraft) { ok ->
+                            isSaving = false
+                            if (ok) onDismiss()
+                        }
+                    }
+                },
+                enabled = !isProcessingImage && !isSaving,
+                modifier = Modifier.testTag("save_profile_button")
+            ) {
+                Text(if (isSaving) "Menyimpan..." else "Simpan Profil")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isSaving) {
+                Text("Batal")
+            }
+        },
+        shape = RoundedCornerShape(20.dp)
+    )
+}
+
 

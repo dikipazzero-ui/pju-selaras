@@ -197,4 +197,61 @@ test("Shared checklist period, issue creation, and live chat messages work for m
       createdAt: new Date(Date.now() - 1000),
     })
   );
+
+  // Bob sends a voice note message
+  await assertSucceeds(
+    bobDb.collection("workspaces").doc("ws_bps").collection("messages").doc("msg_vn_1").set({
+      workspaceId: "ws_bps",
+      memberUids: [ALICE_UID, BOB_UID],
+      senderId: BOB_UID,
+      senderName: "Bob",
+      senderEmail: "bob@example.com",
+      text: "Pesan suara (0:08)",
+      tagCluster: "PJU KRISAN",
+      messageType: "voice",
+      audioBase64: "AAAAIGZ0eXBpc29tAAACAGlzb21pc28y",
+      audioDurationSec: 8,
+      createdAt: new Date(Date.now() - 1000),
+    })
+  );
+
+  // Alice updates her workspace profile photo; Bob can read it but cannot overwrite Alice's profile
+  await assertSucceeds(
+    aliceDb.collection("workspaces").doc("ws_bps").collection("profiles").doc(ALICE_UID).set({
+      workspaceId: "ws_bps",
+      userId: ALICE_UID,
+      memberUids: [ALICE_UID, BOB_UID],
+      displayName: "Alice Petugas",
+      photoBase64: "/9j/4AAQSkZJRgABAQAAAQABAAD/",
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+  await assertSucceeds(
+    bobDb.collection("workspaces").doc("ws_bps").collection("profiles")
+      .where("memberUids", "array-contains", BOB_UID).get()
+  );
+  await assertFails(
+    bobDb.collection("workspaces").doc("ws_bps").collection("profiles").doc(ALICE_UID).update({
+      displayName: "Dibajak",
+      updatedAt: new Date(Date.now() - 500),
+    })
+  );
+  // Bob sends a photo report message
+  await assertSucceeds(
+    bobDb.collection("workspaces").doc("ws_bps").collection("messages").doc("msg_img_1").set({
+      workspaceId: "ws_bps",
+      memberUids: [ALICE_UID, BOB_UID],
+      senderId: BOB_UID,
+      senderName: "Bob",
+      senderEmail: "bob@example.com",
+      text: "Lampu tiang Krisan 2 mati",
+      tagCluster: "PJU KRISAN",
+      messageType: "image",
+      audioBase64: "",
+      audioDurationSec: 0,
+      imageBase64: "/9j/4AAQSkZJRgABAQAAAQABAAD/",
+      createdAt: new Date(Date.now() - 1000),
+    })
+  );
 });

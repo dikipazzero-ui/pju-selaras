@@ -88,7 +88,10 @@ import com.example.ui.components.ChecklistMatrixTable
 import com.example.ui.components.DashboardStatsSection
 import com.example.ui.components.FormHeaderAndFiltersCard
 import com.example.ui.components.IssuesAndNotesCard
+import androidx.compose.material.icons.filled.AccountCircle
 import com.example.ui.components.LiveChatTabContent
+import com.example.ui.components.MemberAvatar
+import com.example.ui.components.ProfilePhotoDialog
 import com.example.ui.components.ResetPeriodDialog
 import com.example.ui.components.RulesAndPicCard
 import com.example.ui.components.SlotLabelsDialog
@@ -119,6 +122,8 @@ fun PjuMainScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val workspaces by viewModel.workspaces.collectAsStateWithLifecycle()
     val activeWorkspace by viewModel.activeWorkspace.collectAsStateWithLifecycle()
+    val personalProfile by viewModel.personalProfile.collectAsStateWithLifecycle()
+    val workspaceProfiles by viewModel.workspaceProfiles.collectAsStateWithLifecycle()
     val chatMessagesState by viewModel.chatMessages.collectAsStateWithLifecycle()
     val isSendingChat by viewModel.isSendingChat.collectAsStateWithLifecycle()
     val generalNotesDraft by viewModel.generalNotesDraft.collectAsStateWithLifecycle()
@@ -133,6 +138,7 @@ fun PjuMainScreen(
     var editingSlotsCluster by remember { mutableStateOf<PjuCluster?>(null) }
     var showResetDialog by remember { mutableStateOf(false) }
     var showTeamDialog by remember { mutableStateOf(false) }
+    var showProfileDialog by remember { mutableStateOf(false) }
     var showOverflowMenu by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -141,7 +147,14 @@ fun PjuMainScreen(
         }
     }
 
-    val currentUserEmail = Firebase.auth.currentUser?.email ?: "Petugas PJU"
+    val currentFirebaseUser = Firebase.auth.currentUser
+    val currentUserEmail = currentFirebaseUser?.email ?: "Petugas PJU"
+    val myProfile = workspaceProfiles[currentUserId] ?: personalProfile
+    val myDisplayName = myProfile?.displayName?.ifBlank { null }
+        ?: activeWorkspace?.memberNames?.get(currentUserId)?.ifBlank { null }
+        ?: currentFirebaseUser?.displayName?.ifBlank { null }
+        ?: currentUserEmail.substringBefore('@')
+    val myPhotoBase64 = myProfile?.photoBase64 ?: ""
     val dashboardData = (uiState as? UiState.Success)?.data
     val chatCount = (chatMessagesState as? UiState.Success)?.data?.size ?: 0
 
@@ -221,6 +234,17 @@ fun PjuMainScreen(
                         }
                     },
                     actions = {
+                        IconButton(
+                            onClick = { showProfileDialog = true },
+                            modifier = Modifier.testTag("top_profile_avatar_button")
+                        ) {
+                            MemberAvatar(
+                                displayName = myDisplayName,
+                                photoBase64 = myPhotoBase64,
+                                size = 32.dp
+                            )
+                        }
+
                         if (activeWorkspace != null) {
                             IconButton(
                                 onClick = { showTeamDialog = true },
@@ -314,6 +338,19 @@ fun PjuMainScreen(
                                     enabled = false
                                 )
                                 HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = { Text("Foto & Nama Profil") },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Filled.AccountCircle,
+                                            contentDescription = null
+                                        )
+                                    },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        showProfileDialog = true
+                                    }
+                                )
                                 if (activeWorkspace != null) {
                                     DropdownMenuItem(
                                         text = { Text("Tim Online & Kode Gabung") },
@@ -459,11 +496,17 @@ fun PjuMainScreen(
                         LiveChatTabContent(
                             workspace = ws,
                             messagesState = chatMessagesState,
+                            profilesMap = workspaceProfiles,
+                            myProfile = myProfile,
                             currentUserId = currentUserId,
                             isSending = isSendingChat,
                             onSendMessage = viewModel::sendChatMessage,
+                            onSendVoiceMessage = viewModel::sendVoiceMessage,
+                            onSendImageMessage = viewModel::sendImageMessage,
                             onDeleteMessage = viewModel::deleteChatMessage,
-                            onOpenTeamDialog = { showTeamDialog = true }
+                            onOpenTeamDialog = { showTeamDialog = true },
+                            onOpenProfileDialog = { showProfileDialog = true },
+                            onShowMessage = viewModel::showMessage
                         )
                     }
                 } else {
@@ -666,6 +709,7 @@ fun PjuMainScreen(
                         TeamWorkspaceDialog(
                             activeWorkspace = ws,
                             allWorkspaces = workspaces,
+                            profilesMap = workspaceProfiles,
                             onSelectWorkspace = viewModel::selectWorkspace,
                             onJoinWorkspace = viewModel::joinWorkspace,
                             onCreateWorkspace = viewModel::createWorkspace,
@@ -676,6 +720,15 @@ fun PjuMainScreen(
                             onDismiss = { showTeamDialog = false }
                         )
                     }
+                }
+
+                if (showProfileDialog) {
+                    ProfilePhotoDialog(
+                        initialDisplayName = myDisplayName,
+                        initialPhotoBase64 = myPhotoBase64,
+                        onSave = viewModel::saveUserProfile,
+                        onDismiss = { showProfileDialog = false }
+                    )
                 }
             }
         }

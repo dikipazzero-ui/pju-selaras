@@ -18,6 +18,7 @@ import com.example.model.PjuCluster
 import com.example.model.PjuIssue
 import com.example.model.TeamWorkspace
 import com.example.model.UiState
+import com.example.model.UserProfile
 import com.example.model.buildCellKey
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
@@ -168,6 +169,45 @@ class PjuChecklistViewModel(
             repository.observeIssues(ws, currentUserId, month, year)
         }
 
+    val personalProfile: StateFlow<UserProfile?> = repository.observePersonalProfile(currentUserId)
+        .catch { error ->
+            val firestoreError = generateSequence(error) { it.cause }
+                .filterIsInstance<FirebaseFirestoreException>()
+                .firstOrNull()
+            if (firestoreError == null && error is CancellationException) throw error
+            Log.w(TAG, "Error observing personal profile", firestoreError ?: error)
+            emit(null)
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+            initialValue = null
+        )
+
+    val workspaceProfiles: StateFlow<Map<String, UserProfile>> = activeWorkspaceFlow
+        .distinctUntilChanged { a, b -> a.id == b.id }
+        .onEach { ws ->
+            viewModelScope.launch {
+                repository.ensurePersonalProfileSyncedToWorkspace(ws, currentUserId)
+            }
+        }
+        .flatMapLatest { ws ->
+            repository.observeWorkspaceProfiles(ws, currentUserId)
+        }
+        .catch { error ->
+            val firestoreError = generateSequence(error) { it.cause }
+                .filterIsInstance<FirebaseFirestoreException>()
+                .firstOrNull()
+            if (firestoreError == null && error is CancellationException) throw error
+            Log.w(TAG, "Error observing workspace profiles", firestoreError ?: error)
+            emit(emptyMap())
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+            initialValue = emptyMap()
+        )
+
     val chatMessages: StateFlow<UiState<List<ChatMessage>>> = activeWorkspaceFlow
         .distinctUntilChanged { a, b -> a.id == b.id }
         .flatMapLatest { ws ->
@@ -281,22 +321,24 @@ class PjuChecklistViewModel(
                 }
         }
 
-        // Automatically sync memberUids onto period, issues, and messages when a new member joins
+        // Automatically sync memberUids onto period, issues, messages, and profiles when a new member joins
         viewModelScope.launch {
             combine(
                 uiState,
-                chatMessages
-            ) { dashState, chatState ->
+                chatMessages,
+                workspaceProfiles
+            ) { dashState, chatState, profilesMap ->
                 val dash = (dashState as? UiState.Success)?.data
                 val msgs = (chatState as? UiState.Success)?.data.orEmpty()
-                dash to msgs
-            }.debounce(800L).collect { (dash, msgs) ->
+                Triple(dash, msgs, profilesMap.values.toList())
+            }.debounce(800L).collect { (dash, msgs, profiles) ->
                 if (dash != null) {
                     repository.syncMemberListsOnWorkspaceDocs(
                         workspace = dash.workspace,
                         period = dash.period,
                         issues = dash.issues,
-                        messages = msgs
+                        messages = msgs,
+                        profiles = profiles
                     )
                 }
             }
@@ -339,16 +381,90 @@ class PjuChecklistViewModel(
         }
     }
 
+    fun saveUserProfile(displayName: String, photoBase64: String, onDone: (Boolean) -> Unit = {}) {
+        viewModelScope.launch {
+            _isMutating.value = true
+            val list = workspaces.value
+            val result = repository.saveUserProfile(currentUserId, list, displayName, photoBase64)
+            _isMutating.value = false
+            result.onSuccess {
+                _snackbarMessages.tryEmit("Foto & nama profil berhasil disimpan")
+                onDone(true)
+            }.onFailure { err ->
+                _snackbarMessages.tryEmit(err.localizedMessage ?: "Gagal menyimpan profil")
+                onDone(false)
+            }
+        }
+    }
+
     fun sendChatMessage(text: String, tagCluster: String = "", onSent: () -> Unit = {}) {
         val ws = activeWorkspace.value ?: return
+        val senderName = workspaceProfiles.value[currentUserId]?.displayName
+            ?: personalProfile.value?.displayName
         viewModelScope.launch {
             _isSendingChat.value = true
-            val result = repository.sendChatMessage(ws, currentUserId, text, tagCluster)
+            val result = repository.sendChatMessage(ws, currentUserId, text, tagCluster, senderName)
             _isSendingChat.value = false
             result.onSuccess {
                 onSent()
             }.onFailure { err ->
                 _snackbarMessages.tryEmit(err.localizedMessage ?: "Gagal mengirim pesan")
+            }
+        }
+    }
+
+    fun sendVoiceMessage(
+        audioBase64: String,
+        durationSec: Int,
+        tagCluster: String = "",
+        onSent: () -> Unit = {}
+    ) {
+        val ws = activeWorkspace.value ?: return
+        val senderName = workspaceProfiles.value[currentUserId]?.displayName
+            ?: personalProfile.value?.displayName
+        viewModelScope.launch {
+            _isSendingChat.value = true
+            val result = repository.sendVoiceMessage(
+                workspace = ws,
+                userId = currentUserId,
+                audioBase64 = audioBase64,
+                durationSec = durationSec,
+                tagCluster = tagCluster,
+                senderDisplayName = senderName
+            )
+            _isSendingChat.value = false
+            result.onSuccess {
+                onSent()
+            }.onFailure { err ->
+                _snackbarMessages.tryEmit(err.localizedMessage ?: "Gagal mengirim voice note")
+            }
+        }
+    }
+
+    fun sendImageMessage(
+        imageBase64: String,
+        caption: String = "",
+        tagCluster: String = "",
+        onSent: () -> Unit = {}
+    ) {
+        val ws = activeWorkspace.value ?: return
+        val senderName = workspaceProfiles.value[currentUserId]?.displayName
+            ?: personalProfile.value?.displayName
+        viewModelScope.launch {
+            _isSendingChat.value = true
+            val result = repository.sendImageMessage(
+                workspace = ws,
+                userId = currentUserId,
+                imageBase64 = imageBase64,
+                caption = caption,
+                tagCluster = tagCluster,
+                senderDisplayName = senderName
+            )
+            _isSendingChat.value = false
+            result.onSuccess {
+                onSent()
+            }.onFailure { err ->
+                _snackbarMessages.tryEmit(err.localizedMessage ?: "Gagal mengirim foto laporan")
             }
         }
     }

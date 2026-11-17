@@ -161,8 +161,45 @@ service cloud.firestore {
              data.text.size() <= 1000 &&
              data.tagCluster is string &&
              data.tagCluster.size() <= 60 &&
+             (!('messageType' in data) || data.messageType in ['text', 'voice', 'image']) &&
+             (!('audioBase64' in data) || (data.audioBase64 is string && data.audioBase64.size() <= 450000)) &&
+             (!('audioDurationSec' in data) || (data.audioDurationSec is int && data.audioDurationSec >= 0 && data.audioDurationSec <= 120)) &&
+             (!('imageBase64' in data) || (data.imageBase64 is string && data.imageBase64.size() <= 450000)) &&
+             (!('messageType' in data) || data.messageType != 'voice' || (('audioBase64' in data) && data.audioBase64.size() >= 10)) &&
+             (!('messageType' in data) || data.messageType != 'image' || (('imageBase64' in data) && data.imageBase64.size() >= 10)) &&
              data.createdAt is timestamp &&
              data.createdAt <= request.time;
+    }
+
+    function isValidUserProfile(data, userId) {
+      return data.userId is string &&
+             data.userId == userId &&
+             data.displayName is string &&
+             data.displayName.size() >= 1 &&
+             data.displayName.size() <= 80 &&
+             data.photoBase64 is string &&
+             data.photoBase64.size() <= 120000 &&
+             data.createdAt is timestamp &&
+             data.createdAt <= request.time &&
+             data.updatedAt is timestamp &&
+             data.updatedAt <= request.time;
+    }
+
+    function isValidWorkspaceProfile(data, workspaceId, profileUid) {
+      return data.workspaceId is string &&
+             data.workspaceId == workspaceId &&
+             data.userId is string &&
+             data.userId == profileUid &&
+             isValidMemberList(data.memberUids) &&
+             data.displayName is string &&
+             data.displayName.size() >= 1 &&
+             data.displayName.size() <= 80 &&
+             data.photoBase64 is string &&
+             data.photoBase64.size() <= 120000 &&
+             data.createdAt is timestamp &&
+             data.createdAt <= request.time &&
+             data.updatedAt is timestamp &&
+             data.updatedAt <= request.time;
     }
 
     // Legacy validators preserved
@@ -345,7 +382,7 @@ service cloud.firestore {
         allow create: if isWorkspaceMember(workspaceId) &&
                          isValidId(messageId) &&
                          incoming().keys().hasAll(['workspaceId', 'memberUids', 'senderId', 'senderName', 'senderEmail', 'text', 'tagCluster', 'createdAt']) &&
-                         incoming().keys().hasOnly(['workspaceId', 'memberUids', 'senderId', 'senderName', 'senderEmail', 'text', 'tagCluster', 'createdAt']) &&
+                         incoming().keys().hasOnly(['workspaceId', 'memberUids', 'senderId', 'senderName', 'senderEmail', 'text', 'tagCluster', 'messageType', 'audioBase64', 'audioDurationSec', 'imageBase64', 'createdAt']) &&
                          incoming().senderId == request.auth.uid &&
                          request.auth.uid in incoming().memberUids &&
                          isValidChatMessage(incoming(), workspaceId);
@@ -366,6 +403,59 @@ service cloud.firestore {
                          isValidId(messageId) &&
                          (existing().senderId == request.auth.uid || isWorkspaceOwner(workspaceId));
       }
+
+      // Member Profiles inside Workspace (photoBase64 + displayName)
+      match /profiles/{profileUid} {
+        allow get: if isWorkspaceMember(workspaceId) && isValidId(profileUid);
+        allow list: if isSignedIn() && request.auth.uid in existing().memberUids;
+
+        allow create: if isWorkspaceMember(workspaceId) &&
+                         isOwner(profileUid) &&
+                         isValidId(profileUid) &&
+                         incoming().keys().hasAll(['workspaceId', 'userId', 'memberUids', 'displayName', 'photoBase64', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['workspaceId', 'userId', 'memberUids', 'displayName', 'photoBase64', 'createdAt', 'updatedAt']) &&
+                         request.auth.uid in incoming().memberUids &&
+                         isValidWorkspaceProfile(incoming(), workspaceId, profileUid);
+
+        allow update: if isWorkspaceMember(workspaceId) &&
+                         isValidId(profileUid) &&
+                         isValidWorkspaceProfile(incoming(), workspaceId, profileUid) &&
+                         incoming().workspaceId == existing().workspaceId &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         (
+                           (
+                             isOwner(profileUid) &&
+                             incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoBase64', 'memberUids', 'updatedAt'])
+                           ) ||
+                           (
+                             request.auth.uid in incoming().memberUids &&
+                             incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'updatedAt'])
+                           )
+                         );
+
+        allow delete: if isWorkspaceMember(workspaceId) && isOwner(profileUid) && isValidId(profileUid);
+      }
+    }
+
+    // Personal User Profile (for persisting photo across workspaces)
+    match /users/{userId}/profile/{docId} {
+      allow get, list: if isOwner(userId);
+
+      allow create: if isOwner(userId) &&
+                       isValidId(docId) &&
+                       incoming().keys().hasAll(['userId', 'displayName', 'photoBase64', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'displayName', 'photoBase64', 'createdAt', 'updatedAt']) &&
+                       isValidUserProfile(incoming(), userId);
+
+      allow update: if isOwner(userId) &&
+                       isValidId(docId) &&
+                       isValidUserProfile(incoming(), userId) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoBase64', 'updatedAt']);
+
+      allow delete: if isOwner(userId) && isValidId(docId);
     }
 
     // Legacy user-scoped paths preserved
