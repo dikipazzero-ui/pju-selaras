@@ -28,8 +28,8 @@ jobs:
             yes | "$SDKMGR" --licenses > /dev/null 2>&1 || true
           fi
           mkdir -p "${ANDROID_HOME:-/usr/local/lib/android/sdk}/licenses"
-          printf "\n24333f8a63b6825ea9c5514f83c2829b004d1fee\n" > "${ANDROID_HOME:-/usr/local/lib/android/sdk}/licenses/android-sdk-license"
-          printf "\n84831b9409646a918e30573bab4c9c91346d8abd\n" > "${ANDROID_HOME:-/usr/local/lib/android/sdk}/licenses/android-sdk-preview-license"
+          grep -qxF "24333f8a63b6825ea9c5514f83c2829b004d1fee" "${ANDROID_HOME:-/usr/local/lib/android/sdk}/licenses/android-sdk-license" 2>/dev/null || printf "\n24333f8a63b6825ea9c5514f83c2829b004d1fee\n" >> "${ANDROID_HOME:-/usr/local/lib/android/sdk}/licenses/android-sdk-license"
+          grep -qxF "84831b9409646a918e30573bab4c9c91346d8abd" "${ANDROID_HOME:-/usr/local/lib/android/sdk}/licenses/android-sdk-preview-license" 2>/dev/null || printf "\n84831b9409646a918e30573bab4c9c91346d8abd\n" >> "${ANDROID_HOME:-/usr/local/lib/android/sdk}/licenses/android-sdk-preview-license"
 
       - name: Prepare signing keystore
         run: |
@@ -39,13 +39,26 @@ jobs:
             keytool -genkeypair -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           fi
 
+      - name: Restore google-services.json
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ ! -f app/google-services.json ]; then
+            if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+              printf '%s\n' "$GOOGLE_SERVICES_JSON" > app/google-services.json
+            else
+              echo "::error::File app/google-services.json tidak ikut ter-push ke GitHub. Tambahkan Secret bernama GOOGLE_SERVICES_JSON di Settings -> Secrets and variables -> Actions."
+              exit 1
+            fi
+          fi
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
 
       - name: Build Debug APK
-        run: gradle :app:assembleDebug --no-daemon
+        run: gradle :app:assembleDebug
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
