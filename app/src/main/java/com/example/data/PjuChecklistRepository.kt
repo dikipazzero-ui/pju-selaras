@@ -3,6 +3,9 @@ package com.example.data
 import android.content.Context
 import com.example.R
 import com.example.media.formatDurationSeconds
+import com.example.model.ActivityReport
+import com.example.model.ActivityReportStatus
+import com.example.model.ActivityReportType
 import com.example.model.ChatMessage
 import com.example.model.ChecklistPeriod
 import com.example.model.DEFAULT_MONTH
@@ -73,6 +76,9 @@ class PjuChecklistRepository(
 
     private fun profilesCollection(workspaceId: String) =
         workspaceRef(workspaceId).collection("profiles")
+
+    private fun activitiesCollection(workspaceId: String) =
+        workspaceRef(workspaceId).collection("activities")
 
     private fun personalProfileDoc(uid: String) =
         db.collection("users").document(uid).collection("profile").document("main")
@@ -336,7 +342,8 @@ class PjuChecklistRepository(
         period: ChecklistPeriod?,
         issues: List<PjuIssue>,
         messages: List<ChatMessage>,
-        profiles: List<UserProfile> = emptyList()
+        profiles: List<UserProfile> = emptyList(),
+        activities: List<ActivityReport> = emptyList()
     ) {
         val uid = auth.currentUser?.uid ?: return
         val targetMembers = workspace.memberUids
@@ -356,8 +363,11 @@ class PjuChecklistRepository(
         val outdatedProfiles = profiles.filter {
             it.userId.isNotBlank() && uid in it.memberUids && !it.memberUids.containsAll(targetMembers)
         }
+        val outdatedActivities = activities.filter {
+            it.id.isNotBlank() && uid in it.memberUids && !it.memberUids.containsAll(targetMembers)
+        }
 
-        if (!missingOnPeriod && outdatedIssues.isEmpty() && outdatedMessages.isEmpty() && outdatedProfiles.isEmpty()) return
+        if (!missingOnPeriod && outdatedIssues.isEmpty() && outdatedMessages.isEmpty() && outdatedProfiles.isEmpty() && outdatedActivities.isEmpty()) return
 
         try {
             val batch = db.batch()
@@ -400,6 +410,17 @@ class PjuChecklistRepository(
                 if (ops >= 450) break
                 batch.update(
                     profilesCollection(workspace.id).document(profile.userId),
+                    mapOf(
+                        "memberUids" to targetMembers,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+                ops++
+            }
+            for (act in outdatedActivities) {
+                if (ops >= 450) break
+                batch.update(
+                    activitiesCollection(workspace.id).document(act.id),
                     mapOf(
                         "memberUids" to targetMembers,
                         "updatedAt" to FieldValue.serverTimestamp()
@@ -796,6 +817,135 @@ class PjuChecklistRepository(
             throw e
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.CREATE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    fun observeActivityReports(workspace: TeamWorkspace, userId: String): Flow<List<ActivityReport>> = flow {
+        val uid = requireUserId(userId)
+        val collectionRef = activitiesCollection(workspace.id)
+        emitAll(
+            collectionRef
+                .whereArrayContains("memberUids", uid)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(
+                        ActivityReport::class.java,
+                        DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                    ).sortedWith(
+                        compareByDescending<ActivityReport> { it.eventDate }
+                            .thenByDescending { it.eventTime }
+                            .thenByDescending { it.createdAt?.toDate()?.time ?: 0L }
+                    )
+                }
+                .catch { error ->
+                    val firestoreError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (firestoreError == null && error is CancellationException) throw error
+                    val exceptionToLog = firestoreError ?: (error as? Exception)
+                    if (exceptionToLog != null && auth.currentUser?.uid == uid) {
+                        handleFirestoreError(exceptionToLog, OperationType.LIST, collectionRef.path)
+                    }
+                    throw error
+                }
+        )
+    }
+
+    suspend fun addActivityReport(
+        workspace: TeamWorkspace,
+        userId: String,
+        memberName: String,
+        reportType: ActivityReportType,
+        eventDate: String,
+        eventTime: String,
+        location: String,
+        description: String,
+        status: ActivityReportStatus,
+        photoBase64: String = ""
+    ): Result<Unit> {
+        val docRef = activitiesCollection(workspace.id).document()
+        return try {
+            val uid = requireUserId(userId)
+            val cleanMember = memberName.trim().take(80)
+            val cleanDate = eventDate.trim()
+            val cleanTime = eventTime.trim()
+            val cleanLocation = location.trim().take(100)
+            val cleanDesc = description.trim().take(1500)
+            val cleanPhoto = photoBase64.take(450_000)
+
+            require(cleanMember.isNotBlank()) { "Nama anggota wajib diisi" }
+            require(cleanDate.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$"))) { "Format tanggal harus YYYY-MM-DD" }
+            require(cleanTime.matches(Regex("^\\d{2}:\\d{2}$"))) { "Format jam harus HH:MM" }
+            require(cleanDesc.isNotBlank()) { "Uraian kegiatan/kejadian wajib diisi" }
+
+            val members = workspace.memberUids.ifEmpty { listOf(uid) }.take(50)
+            val payload = mapOf(
+                "workspaceId" to workspace.id,
+                "memberUids" to members,
+                "createdByUid" to uid,
+                "memberName" to cleanMember,
+                "reportType" to reportType.code,
+                "eventDate" to cleanDate,
+                "eventTime" to cleanTime,
+                "location" to cleanLocation,
+                "description" to cleanDesc,
+                "status" to status.label,
+                "photoBase64" to cleanPhoto,
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            docRef.set(payload).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun cycleActivityReportStatus(
+        workspace: TeamWorkspace,
+        userId: String,
+        report: ActivityReport
+    ): Result<Unit> {
+        val docRef = activitiesCollection(workspace.id).document(report.id)
+        return try {
+            val uid = requireUserId(userId)
+            require(report.id.isNotBlank()) { "ID laporan tidak boleh kosong" }
+            val nextStatus = ActivityReportStatus.fromLabel(report.status).next()
+            docRef.update(
+                mapOf(
+                    "status" to nextStatus.label,
+                    "memberUids" to workspace.memberUids.ifEmpty { listOf(uid) }.take(50),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteActivityReport(
+        workspace: TeamWorkspace,
+        userId: String,
+        reportId: String
+    ): Result<Unit> {
+        val docRef = activitiesCollection(workspace.id).document(reportId)
+        return try {
+            requireUserId(userId)
+            require(reportId.isNotBlank()) { "ID laporan tidak boleh kosong" }
+            docRef.delete().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, docRef.path)
             Result.failure(e)
         }
     }

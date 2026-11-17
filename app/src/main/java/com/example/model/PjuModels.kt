@@ -190,6 +190,52 @@ data class UserProfile(
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
 
+enum class ActivityReportType(val code: String, val labelId: String) {
+    KEGIATAN("Kegiatan", "Uraian Kegiatan"),
+    KEJADIAN("Kejadian", "Pelaporan Kejadian");
+
+    companion object {
+        fun fromCode(raw: String?): ActivityReportType =
+            entries.firstOrNull { it.code == raw } ?: KEGIATAN
+    }
+}
+
+enum class ActivityReportStatus(val label: String) {
+    TERCATAT("Tercatat"),
+    PROSES("Ditindaklanjuti"),
+    SELESAI("Selesai");
+
+    fun next(): ActivityReportStatus = when (this) {
+        TERCATAT -> PROSES
+        PROSES -> SELESAI
+        SELESAI -> TERCATAT
+    }
+
+    companion object {
+        fun fromLabel(raw: String?): ActivityReportStatus =
+            entries.firstOrNull { it.label == raw } ?: TERCATAT
+    }
+}
+
+@Keep
+@IgnoreExtraProperties
+data class ActivityReport(
+    @DocumentId val id: String = "",
+    val workspaceId: String = "",
+    val memberUids: List<String> = emptyList(),
+    val createdByUid: String = "",
+    val memberName: String = "",
+    val reportType: String = ActivityReportType.KEGIATAN.code,
+    val eventDate: String = "",
+    val eventTime: String = "",
+    val location: String = "",
+    val description: String = "",
+    val status: String = ActivityReportStatus.SELESAI.label,
+    val photoBase64: String = "",
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
 sealed interface UiState<out T> {
     data object Loading : UiState<Nothing>
     data class Success<T>(val data: T) : UiState<T>

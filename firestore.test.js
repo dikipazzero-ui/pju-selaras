@@ -254,4 +254,37 @@ test("Shared checklist period, issue creation, and live chat messages work for m
       createdAt: new Date(Date.now() - 1000),
     })
   );
+
+  // Alice records an activity/incident report; Bob can read and update status; Charlie cannot access
+  await assertSucceeds(
+    aliceDb.collection("workspaces").doc("ws_bps").collection("activities").doc("act_1").set({
+      workspaceId: "ws_bps",
+      memberUids: [ALICE_UID, BOB_UID],
+      createdByUid: ALICE_UID,
+      memberName: "Alice",
+      reportType: "Kejadian",
+      eventDate: "2026-11-17",
+      eventTime: "21:15",
+      location: "Pos Gerbang Utama",
+      description: "Portal gerbang sempat macet dan sudah diperiksa petugas.",
+      status: "Ditindaklanjuti",
+      photoBase64: "",
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+  await assertSucceeds(
+    bobDb.collection("workspaces").doc("ws_bps").collection("activities")
+      .where("memberUids", "array-contains", BOB_UID).get()
+  );
+  await assertSucceeds(
+    bobDb.collection("workspaces").doc("ws_bps").collection("activities").doc("act_1").update({
+      status: "Selesai",
+      updatedAt: new Date(Date.now() - 500),
+    })
+  );
+  await assertFails(
+    charlieDb.collection("workspaces").doc("ws_bps").collection("activities")
+      .where("memberUids", "array-contains", BOB_UID).get()
+  );
 });

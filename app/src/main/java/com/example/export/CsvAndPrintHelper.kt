@@ -8,6 +8,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.core.content.FileProvider
+import com.example.model.ActivityReport
 import com.example.model.ChecklistPeriod
 import com.example.model.DateRangePreset
 import com.example.model.LampStatus
@@ -251,5 +252,142 @@ object CsvAndPrintHelper {
             </body>
             </html>
         """.trimIndent()
+    }
+
+    fun shareActivitiesCsv(
+        context: Context,
+        workspaceName: String,
+        reports: List<ActivityReport>,
+        filterLabel: String
+    ): Result<Unit> = runCatching {
+        fun csvEscape(value: String): String =
+            "\"" + value.replace("\"", "\"\"") + "\""
+
+        val lines = mutableListOf<String>()
+        lines.add(csvEscape("PERUMAHAN BUMI PAPAN SELARAS - $workspaceName"))
+        lines.add(csvEscape("RANGKUMAN URAIAN KEGIATAN & PELAPORAN KEJADIAN ($filterLabel)"))
+        lines.add("")
+        lines.add(
+            listOf("NO", "TANGGAL", "JAM", "JENIS", "NAMA ANGGOTA", "LOKASI", "URAIAN KEGIATAN / KEJADIAN", "STATUS")
+                .joinToString(",") { csvEscape(it) }
+        )
+        reports.forEachIndexed { idx, r ->
+            lines.add(
+                listOf(
+                    (idx + 1).toString(),
+                    r.eventDate,
+                    r.eventTime,
+                    r.reportType,
+                    r.memberName,
+                    r.location.ifBlank { "-" },
+                    r.description,
+                    r.status
+                ).joinToString(",") { csvEscape(it) }
+            )
+        }
+
+        val exportDir = File(context.cacheDir, "exports").apply { mkdirs() }
+        val outFile = File(exportDir, "Rangkuman_Kegiatan_Kejadian_BPS.csv")
+        outFile.writeText("\uFEFF${lines.joinToString("\n")}", Charsets.UTF_8)
+
+        val uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            outFile
+        )
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/csv"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, "Rangkuman Kegiatan & Kejadian - $workspaceName")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        val chooser = Intent.createChooser(shareIntent, "Bagikan / Simpan CSV Kegiatan")
+        chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(chooser)
+    }
+
+    fun printActivitySummary(
+        context: Context,
+        workspaceName: String,
+        reports: List<ActivityReport>,
+        filterLabel: String
+    ): Result<Unit> = runCatching {
+        val kegiatanCount = reports.count { it.reportType == "Kegiatan" }
+        val kejadianCount = reports.count { it.reportType == "Kejadian" }
+        val rowsHtml = if (reports.isEmpty()) {
+            "<tr><td colspan='7' style='text-align:center;'>Belum ada laporan kegiatan atau kejadian.</td></tr>"
+        } else {
+            reports.mapIndexed { idx, r ->
+                """
+                <tr>
+                  <td style='text-align:center;'>${idx + 1}</td>
+                  <td>${htmlEscape(r.eventDate)}<br/><b>${htmlEscape(r.eventTime)}</b></td>
+                  <td>${htmlEscape(r.reportType)}</td>
+                  <td><b>${htmlEscape(r.memberName)}</b></td>
+                  <td>${htmlEscape(r.location.ifBlank { "-" })}</td>
+                  <td>${htmlEscape(r.description).replace("\n", "<br/>")}</td>
+                  <td>${htmlEscape(r.status)}</td>
+                </tr>
+                """.trimIndent()
+            }.joinToString("")
+        }
+
+        val html = """
+            <!DOCTYPE html>
+            <html lang="id">
+            <head>
+              <meta charset="UTF-8" />
+              <style>
+                body { font-family: sans-serif; font-size: 9.5pt; color: #000; margin: 14px; }
+                h1, h2 { margin: 0; text-transform: uppercase; }
+                h1 { font-size: 12.5pt; }
+                h2 { font-size: 10.5pt; margin-top: 2px; }
+                .meta { margin: 6px 0 12px 0; font-weight: bold; font-size: 9pt; }
+                table { width: 100%; border-collapse: collapse; }
+                th, td { border: 1px solid #1e293b; padding: 5px 6px; vertical-align: top; }
+                th { background: #f1f5f9; text-align: left; }
+              </style>
+            </head>
+            <body>
+              <h1>PERUMAHAN BUMI PAPAN SELARAS</h1>
+              <h2>RANGKUMAN URAIAN KEGIATAN &amp; PELAPORAN KEJADIAN (${htmlEscape(workspaceName)})</h2>
+              <div class="meta">Filter: ${htmlEscape(filterLabel)} &bull; Total: ${reports.size} Laporan (Kegiatan: $kegiatanCount | Kejadian: $kejadianCount)</div>
+              <table>
+                <thead>
+                  <tr>
+                    <th style="width:28px;">No</th>
+                    <th style="width:82px;">Tanggal / Jam</th>
+                    <th style="width:68px;">Jenis</th>
+                    <th style="width:110px;">Nama Anggota</th>
+                    <th style="width:95px;">Lokasi</th>
+                    <th>Uraian Kegiatan / Kejadian</th>
+                    <th style="width:85px;">Status</th>
+                  </tr>
+                </thead>
+                <tbody>$rowsHtml</tbody>
+              </table>
+            </body>
+            </html>
+        """.trimIndent()
+
+        val webView = WebView(context)
+        activePrintWebView = webView
+        webView.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean = false
+
+            override fun onPageFinished(view: WebView?, url: String?) {
+                val printManager = context.getSystemService(Context.PRINT_SERVICE) as? PrintManager
+                if (printManager != null && view != null) {
+                    val jobName = "Rangkuman Kegiatan BPS"
+                    val adapter = view.createPrintDocumentAdapter(jobName)
+                    val attributes = PrintAttributes.Builder()
+                        .setMediaSize(PrintAttributes.MediaSize.ISO_A4.asPortrait())
+                        .build()
+                    printManager.print(jobName, adapter, attributes)
+                }
+                activePrintWebView = null
+            }
+        }
+        webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
     }
 }

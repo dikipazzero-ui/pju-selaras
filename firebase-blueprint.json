@@ -319,6 +319,27 @@
       },
       "required": ["workspaceId", "userId", "memberUids", "displayName", "photoBase64", "createdAt", "updatedAt"]
     },
+    "ActivityReport": {
+      "title": "ActivityReport",
+      "description": "Team activity log or incident report with member name, event date/time, description, status, and optional photo.",
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string" },
+        "memberUids": { "type": "array" },
+        "createdByUid": { "type": "string" },
+        "memberName": { "type": "string" },
+        "reportType": { "type": "string", "enum": ["Kegiatan", "Kejadian"] },
+        "eventDate": { "type": "string", "description": "YYYY-MM-DD" },
+        "eventTime": { "type": "string", "description": "HH:mm" },
+        "location": { "type": "string" },
+        "description": { "type": "string" },
+        "status": { "type": "string", "enum": ["Tercatat", "Ditindaklanjuti", "Selesai"] },
+        "photoBase64": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["workspaceId", "memberUids", "createdByUid", "memberName", "reportType", "eventDate", "eventTime", "location", "description", "status", "photoBase64", "createdAt", "updatedAt"]
+    },
     "ChecklistPeriod": {
       "title": "ChecklistPeriod",
       "description": "Legacy personal monthly PJU inspection checklist sheet.",
@@ -379,6 +400,10 @@
     "/workspaces/{workspaceId}/profiles/{profileUid}": {
       "schema": { "$ref": "#/entities/WorkspaceProfile" },
       "description": "Shared member profile photos and display names inside workspace."
+    },
+    "/workspaces/{workspaceId}/activities/{activityId}": {
+      "schema": { "$ref": "#/entities/ActivityReport" },
+      "description": "Team activity logs and incident reports with member name, date, and time."
     },
     "/users/{userId}/profile/{docId}": {
       "schema": { "$ref": "#/entities/UserProfile" },

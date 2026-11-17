@@ -89,6 +89,9 @@ import com.example.ui.components.DashboardStatsSection
 import com.example.ui.components.FormHeaderAndFiltersCard
 import com.example.ui.components.IssuesAndNotesCard
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.Assignment
+import androidx.compose.material.icons.outlined.Assignment
+import com.example.ui.components.ActivityReportsTabContent
 import com.example.ui.components.LiveChatTabContent
 import com.example.ui.components.MemberAvatar
 import com.example.ui.components.ProfilePhotoDialog
@@ -125,6 +128,7 @@ fun PjuMainScreen(
     val personalProfile by viewModel.personalProfile.collectAsStateWithLifecycle()
     val workspaceProfiles by viewModel.workspaceProfiles.collectAsStateWithLifecycle()
     val chatMessagesState by viewModel.chatMessages.collectAsStateWithLifecycle()
+    val activityReportsState by viewModel.activityReports.collectAsStateWithLifecycle()
     val isSendingChat by viewModel.isSendingChat.collectAsStateWithLifecycle()
     val generalNotesDraft by viewModel.generalNotesDraft.collectAsStateWithLifecycle()
     val picNameDraft by viewModel.picNameDraft.collectAsStateWithLifecycle()
@@ -133,7 +137,7 @@ fun PjuMainScreen(
 
     val snackbarHostState = remember { SnackbarHostState() }
 
-    var selectedTab by remember { mutableIntStateOf(0) } // 0 = Checklist, 1 = Live Chat
+    var selectedTab by remember { mutableIntStateOf(0) } // 0 = Checklist, 1 = Kegiatan, 2 = Live Chat
     var showManualIssueDialog by remember { mutableStateOf(false) }
     var editingSlotsCluster by remember { mutableStateOf<PjuCluster?>(null) }
     var showResetDialog by remember { mutableStateOf(false) }
@@ -156,6 +160,8 @@ fun PjuMainScreen(
         ?: currentUserEmail.substringBefore('@')
     val myPhotoBase64 = myProfile?.photoBase64 ?: ""
     val dashboardData = (uiState as? UiState.Success)?.data
+    val activityList = (activityReportsState as? UiState.Success)?.data.orEmpty()
+    val activityCount = activityList.size
     val chatCount = (chatMessagesState as? UiState.Success)?.data?.size ?: 0
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -260,19 +266,33 @@ fun PjuMainScreen(
 
                         IconButton(
                             onClick = {
-                                val data = dashboardData
-                                if (data != null) {
-                                    CsvAndPrintHelper.shareCsv(
-                                        context = context,
-                                        period = data.period,
-                                        issues = data.issues,
-                                        rangePreset = data.selection.rangePreset
-                                    ).onFailure {
-                                        viewModel.showMessage(it.localizedMessage ?: "Gagal membuat file CSV")
+                                if (selectedTab == 1) {
+                                    val ws = activeWorkspace
+                                    if (ws != null) {
+                                        CsvAndPrintHelper.shareActivitiesCsv(
+                                            context = context,
+                                            workspaceName = ws.name,
+                                            reports = activityList,
+                                            filterLabel = "Semua Data"
+                                        ).onFailure {
+                                            viewModel.showMessage(it.localizedMessage ?: "Gagal membuat file CSV kegiatan")
+                                        }
+                                    }
+                                } else {
+                                    val data = dashboardData
+                                    if (data != null) {
+                                        CsvAndPrintHelper.shareCsv(
+                                            context = context,
+                                            period = data.period,
+                                            issues = data.issues,
+                                            rangePreset = data.selection.rangePreset
+                                        ).onFailure {
+                                            viewModel.showMessage(it.localizedMessage ?: "Gagal membuat file CSV")
+                                        }
                                     }
                                 }
                             },
-                            enabled = dashboardData != null,
+                            enabled = if (selectedTab == 1) activeWorkspace != null else dashboardData != null,
                             modifier = Modifier.testTag("export_csv_button")
                         ) {
                             Icon(
@@ -284,19 +304,33 @@ fun PjuMainScreen(
 
                         IconButton(
                             onClick = {
-                                val data = dashboardData
-                                if (data != null) {
-                                    CsvAndPrintHelper.printChecklistForm(
-                                        context = context,
-                                        period = data.period,
-                                        issues = data.issues,
-                                        rangePreset = data.selection.rangePreset
-                                    ).onFailure {
-                                        viewModel.showMessage(it.localizedMessage ?: "Gagal membuka dialog cetak")
+                                if (selectedTab == 1) {
+                                    val ws = activeWorkspace
+                                    if (ws != null) {
+                                        CsvAndPrintHelper.printActivitySummary(
+                                            context = context,
+                                            workspaceName = ws.name,
+                                            reports = activityList,
+                                            filterLabel = "Semua Data"
+                                        ).onFailure {
+                                            viewModel.showMessage(it.localizedMessage ?: "Gagal membuka dialog cetak kegiatan")
+                                        }
+                                    }
+                                } else {
+                                    val data = dashboardData
+                                    if (data != null) {
+                                        CsvAndPrintHelper.printChecklistForm(
+                                            context = context,
+                                            period = data.period,
+                                            issues = data.issues,
+                                            rangePreset = data.selection.rangePreset
+                                        ).onFailure {
+                                            viewModel.showMessage(it.localizedMessage ?: "Gagal membuka dialog cetak")
+                                        }
                                     }
                                 }
                             },
-                            enabled = dashboardData != null,
+                            enabled = if (selectedTab == 1) activeWorkspace != null else dashboardData != null,
                             modifier = Modifier.testTag("print_form_button")
                         ) {
                             Icon(
@@ -413,7 +447,7 @@ fun PjuMainScreen(
                                 contentDescription = "Checklist PJU"
                             )
                         },
-                        label = { Text("Checklist PJU", fontWeight = FontWeight.SemiBold) },
+                        label = { Text("Checklist", fontWeight = FontWeight.SemiBold, maxLines = 1) },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = Slate950,
                             selectedTextColor = Amber500,
@@ -429,6 +463,38 @@ fun PjuMainScreen(
                         icon = {
                             BadgedBox(
                                 badge = {
+                                    if (activityCount > 0) {
+                                        Badge(
+                                            containerColor = Amber100,
+                                            contentColor = Amber900
+                                        ) {
+                                            Text(activityCount.coerceAtMost(99).toString())
+                                        }
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = if (selectedTab == 1) Icons.Filled.Assignment else Icons.Outlined.Assignment,
+                                    contentDescription = "Kegiatan & Kejadian"
+                                )
+                            }
+                        },
+                        label = { Text("Kegiatan", fontWeight = FontWeight.SemiBold, maxLines = 1) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = Slate950,
+                            selectedTextColor = Amber500,
+                            indicatorColor = Amber500,
+                            unselectedIconColor = Color.White.copy(alpha = 0.7f),
+                            unselectedTextColor = Color.White.copy(alpha = 0.7f)
+                        ),
+                        modifier = Modifier.testTag("nav_activities_tab")
+                    )
+                    NavigationBarItem(
+                        selected = selectedTab == 2,
+                        onClick = { selectedTab = 2 },
+                        icon = {
+                            BadgedBox(
+                                badge = {
                                     if (chatCount > 0) {
                                         Badge(
                                             containerColor = Amber100,
@@ -440,12 +506,12 @@ fun PjuMainScreen(
                                 }
                             ) {
                                 Icon(
-                                    imageVector = if (selectedTab == 1) Icons.Filled.Forum else Icons.Outlined.Forum,
+                                    imageVector = if (selectedTab == 2) Icons.Filled.Forum else Icons.Outlined.Forum,
                                     contentDescription = "Live Chat Tim"
                                 )
                             }
                         },
-                        label = { Text("Live Chat", fontWeight = FontWeight.SemiBold) },
+                        label = { Text("Live Chat", fontWeight = FontWeight.SemiBold, maxLines = 1) },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = Slate950,
                             selectedTextColor = Amber500,
@@ -472,6 +538,40 @@ fun PjuMainScreen(
                 }
 
                 if (selectedTab == 1) {
+                    val ws = activeWorkspace
+                    if (ws == null) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(24.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    CircularProgressIndicator()
+                                    Text("Menyiapkan laporan kegiatan...")
+                                }
+                            }
+                        }
+                    } else {
+                        ActivityReportsTabContent(
+                            workspace = ws,
+                            reportsState = activityReportsState,
+                            profilesMap = workspaceProfiles,
+                            currentUserId = currentUserId,
+                            myDisplayName = myDisplayName,
+                            onAddReport = viewModel::addActivityReport,
+                            onCycleStatus = viewModel::cycleActivityReportStatus,
+                            onDeleteReport = viewModel::deleteActivityReport,
+                            onShowMessage = viewModel::showMessage
+                        )
+                    }
+                } else if (selectedTab == 2) {
                     val ws = activeWorkspace
                     if (ws == null) {
                         Box(

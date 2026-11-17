@@ -4,6 +4,9 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.PjuChecklistRepository
+import com.example.model.ActivityReport
+import com.example.model.ActivityReportStatus
+import com.example.model.ActivityReportType
 import com.example.model.ChatMessage
 import com.example.model.ChecklistPeriod
 import com.example.model.DEFAULT_MONTH
@@ -229,6 +232,27 @@ class PjuChecklistViewModel(
             initialValue = UiState.Loading
         )
 
+    val activityReports: StateFlow<UiState<List<ActivityReport>>> = activeWorkspaceFlow
+        .distinctUntilChanged { a, b -> a.id == b.id }
+        .flatMapLatest { ws ->
+            repository.observeActivityReports(ws, currentUserId)
+        }
+        .map<List<ActivityReport>, UiState<List<ActivityReport>>> { UiState.Success(it) }
+        .catch { error ->
+            val firestoreError = generateSequence(error) { it.cause }
+                .filterIsInstance<FirebaseFirestoreException>()
+                .firstOrNull()
+            if (firestoreError == null && error is CancellationException) throw error
+            val rootError = firestoreError ?: error
+            Log.w(TAG, "Error observing activity reports", rootError)
+            emit(UiState.Error(rootError.localizedMessage ?: "Gagal memuat laporan kegiatan"))
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+            initialValue = UiState.Loading
+        )
+
     val uiState: StateFlow<UiState<PjuDashboardData>> = combine(
         activeWorkspaceFlow,
         periodFlow,
@@ -321,24 +345,34 @@ class PjuChecklistViewModel(
                 }
         }
 
-        // Automatically sync memberUids onto period, issues, messages, and profiles when a new member joins
+        // Automatically sync memberUids onto period, issues, messages, profiles, and activities when a new member joins
         viewModelScope.launch {
             combine(
                 uiState,
                 chatMessages,
-                workspaceProfiles
-            ) { dashState, chatState, profilesMap ->
+                workspaceProfiles,
+                activityReports
+            ) { dashState, chatState, profilesMap, actState ->
                 val dash = (dashState as? UiState.Success)?.data
                 val msgs = (chatState as? UiState.Success)?.data.orEmpty()
-                Triple(dash, msgs, profilesMap.values.toList())
-            }.debounce(800L).collect { (dash, msgs, profiles) ->
+                val acts = (actState as? UiState.Success)?.data.orEmpty()
+                listOf(dash, msgs, profilesMap.values.toList(), acts)
+            }.debounce(800L).collect { tuple ->
+                val dash = tuple[0] as? PjuDashboardData
+                @Suppress("UNCHECKED_CAST")
+                val msgs = tuple[1] as List<ChatMessage>
+                @Suppress("UNCHECKED_CAST")
+                val profiles = tuple[2] as List<UserProfile>
+                @Suppress("UNCHECKED_CAST")
+                val acts = tuple[3] as List<ActivityReport>
                 if (dash != null) {
                     repository.syncMemberListsOnWorkspaceDocs(
                         workspace = dash.workspace,
                         period = dash.period,
                         issues = dash.issues,
                         messages = msgs,
-                        profiles = profiles
+                        profiles = profiles,
+                        activities = acts
                     )
                 }
             }
@@ -475,6 +509,65 @@ class PjuChecklistViewModel(
             val result = repository.deleteChatMessage(ws, currentUserId, messageId)
             result.onFailure { err ->
                 _snackbarMessages.tryEmit(err.localizedMessage ?: "Gagal menghapus pesan")
+            }
+        }
+    }
+
+    fun addActivityReport(
+        memberName: String,
+        reportType: ActivityReportType,
+        eventDate: String,
+        eventTime: String,
+        location: String,
+        description: String,
+        status: ActivityReportStatus,
+        photoBase64: String = "",
+        onDone: (Boolean) -> Unit = {}
+    ) {
+        val ws = activeWorkspace.value ?: return
+        viewModelScope.launch {
+            _isMutating.value = true
+            val result = repository.addActivityReport(
+                workspace = ws,
+                userId = currentUserId,
+                memberName = memberName,
+                reportType = reportType,
+                eventDate = eventDate,
+                eventTime = eventTime,
+                location = location,
+                description = description,
+                status = status,
+                photoBase64 = photoBase64
+            )
+            _isMutating.value = false
+            result.onSuccess {
+                _snackbarMessages.tryEmit("Laporan ${reportType.code.lowercase()} tersimpan")
+                onDone(true)
+            }.onFailure { err ->
+                _snackbarMessages.tryEmit(err.localizedMessage ?: "Gagal menyimpan laporan")
+                onDone(false)
+            }
+        }
+    }
+
+    fun cycleActivityReportStatus(report: ActivityReport) {
+        val ws = activeWorkspace.value ?: return
+        viewModelScope.launch {
+            val result = repository.cycleActivityReportStatus(ws, currentUserId, report)
+            result.onFailure { err ->
+                _snackbarMessages.tryEmit(err.localizedMessage ?: "Gagal mengubah status laporan")
+            }
+        }
+    }
+
+    fun deleteActivityReport(reportId: String) {
+        val ws = activeWorkspace.value ?: return
+        viewModelScope.launch {
+            val result = repository.deleteActivityReport(ws, currentUserId, reportId)
+            result.onSuccess {
+                _snackbarMessages.tryEmit("Laporan kegiatan dihapus")
+            }.onFailure { err ->
+                _snackbarMessages.tryEmit(err.localizedMessage ?: "Gagal menghapus laporan")
             }
         }
     }
