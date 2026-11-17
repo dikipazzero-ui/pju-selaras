@@ -113,7 +113,7 @@ fun ChecklistMatrixTable(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
         border = BorderStroke(1.5.dp, gridBorderColor),
-        color = surfaceColor
+        color = surfaceColor.copy(alpha = 0.93f)
     ) {
         Row(modifier = Modifier.fillMaxWidth()) {
             // Sticky Left Columns: NO. + CLUSTER

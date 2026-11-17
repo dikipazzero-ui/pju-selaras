@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import com.example.model.IssueStatus
 import com.example.model.PJU_CLUSTERS
 import com.example.model.PjuCluster
+import com.example.model.TeamWorkspace
 import com.example.ui.IssueDialogPrefill
 import com.example.ui.theme.Rose600
 
@@ -377,3 +378,192 @@ fun ResetPeriodDialog(
         shape = RoundedCornerShape(20.dp)
     )
 }
+
+@Composable
+fun TeamWorkspaceDialog(
+    activeWorkspace: TeamWorkspace,
+    allWorkspaces: List<TeamWorkspace>,
+    onSelectWorkspace: (String) -> Unit,
+    onJoinWorkspace: (code: String, onDone: (Boolean) -> Unit) -> Unit,
+    onCreateWorkspace: (name: String, onDone: (Boolean) -> Unit) -> Unit,
+    onCopyInviteCode: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var joinCodeInput by remember { mutableStateOf("") }
+    var newTeamNameInput by remember { mutableStateOf("") }
+    var actionError by remember { mutableStateOf<String?>(null) }
+    var isBusy by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "Tim Online Bersama",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "Kode Tim Aktif: ${activeWorkspace.inviteCode}",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = "Bagikan kode ini ke petugas/pengurus lain agar bisa mengisi checklist dan live chat dalam satu tim secara real-time.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Button(
+                    onClick = { onCopyInviteCode(activeWorkspace.inviteCode) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Salin Kode Tim (${activeWorkspace.inviteCode})")
+                }
+
+                if (activeWorkspace.memberNames.isNotEmpty()) {
+                    Text(
+                        text = "Anggota Terhubung (${activeWorkspace.memberNames.size}):",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        activeWorkspace.memberNames.values.forEachIndexed { idx, memberName ->
+                            Text(
+                                text = "${idx + 1}. $memberName",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+
+                if (allWorkspaces.size > 1) {
+                    Text(
+                        text = "Pindah Tim Anda:",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        allWorkspaces.forEach { ws ->
+                            val isSelected = ws.id == activeWorkspace.id
+                            androidx.compose.material3.OutlinedButton(
+                                onClick = {
+                                    onSelectWorkspace(ws.id)
+                                    onDismiss()
+                                },
+                                enabled = !isSelected,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = if (isSelected) "${ws.name} (Aktif)" else "${ws.name} (${ws.inviteCode})"
+                                )
+                            }
+                        }
+                    }
+                }
+
+                androidx.compose.material3.HorizontalDivider()
+
+                Text(
+                    text = "Gabung ke Tim Lain",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                OutlinedTextField(
+                    value = joinCodeInput,
+                    onValueChange = {
+                        joinCodeInput = it.uppercase().take(16)
+                        actionError = null
+                    },
+                    label = { Text("Masukkan Kode Tim") },
+                    placeholder = { Text("Contoh: BPS7X2K") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("join_team_code_input")
+                )
+                Button(
+                    onClick = {
+                        val trimmed = joinCodeInput.trim()
+                        if (trimmed.length < 4) {
+                            actionError = "Masukkan kode tim minimal 4 huruf/angka."
+                        } else {
+                            isBusy = true
+                            onJoinWorkspace(trimmed) { ok ->
+                                isBusy = false
+                                if (ok) onDismiss()
+                            }
+                        }
+                    },
+                    enabled = !isBusy && joinCodeInput.isNotBlank(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("join_team_submit_button")
+                ) {
+                    Text("Gabung Tim Ini")
+                }
+
+                androidx.compose.material3.HorizontalDivider()
+
+                Text(
+                    text = "Atau Buat Tim Baru",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                OutlinedTextField(
+                    value = newTeamNameInput,
+                    onValueChange = {
+                        newTeamNameInput = it.take(60)
+                        actionError = null
+                    },
+                    label = { Text("Nama Tim Baru") },
+                    placeholder = { Text("Misal: Tim Keamanan BPS") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                androidx.compose.material3.OutlinedButton(
+                    onClick = {
+                        val clean = newTeamNameInput.trim()
+                        if (clean.length < 2) {
+                            actionError = "Nama tim minimal 2 karakter."
+                        } else {
+                            isBusy = true
+                            onCreateWorkspace(clean) { ok ->
+                                isBusy = false
+                                if (ok) onDismiss()
+                            }
+                        }
+                    },
+                    enabled = !isBusy && newTeamNameInput.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Buat Tim Baru")
+                }
+
+                if (actionError != null) {
+                    Text(
+                        text = actionError ?: "",
+                        color = Rose600,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Tutup")
+            }
+        },
+        shape = RoundedCornerShape(20.dp)
+    )
+}
+

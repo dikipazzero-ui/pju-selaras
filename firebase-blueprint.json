@@ -1,13 +1,101 @@
 {
   "entities": {
-    "ChecklistPeriod": {
-      "title": "ChecklistPeriod",
-      "description": "Monthly PJU inspection checklist sheet containing lamp cell statuses, custom 3-slot labels per cluster, general patrol notes, and PIC name.",
+    "Workspace": {
+      "title": "Workspace",
+      "description": "Shared PJU inspection team workspace enabling multi-member online collaboration and live chat.",
       "type": "object",
       "properties": {
-        "userId": {
+        "name": {
           "type": "string",
-          "description": "Authenticated owner UID matching Firebase Auth."
+          "description": "Workspace display name (e.g. 'Tim PJU Bumi Papan Selaras')."
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "UID of the creator/owner."
+        },
+        "inviteCode": {
+          "type": "string",
+          "description": "Uppercase alphanumeric invite code used by teammates to join."
+        },
+        "memberUids": {
+          "type": "array",
+          "description": "Bounded list (max 50) of member UIDs in this workspace."
+        },
+        "memberNames": {
+          "type": "object",
+          "description": "Map of member UID to display name."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp (FieldValue.serverTimestamp()) when workspace was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp (FieldValue.serverTimestamp()) when workspace was last updated."
+        }
+      },
+      "required": [
+        "name",
+        "ownerId",
+        "inviteCode",
+        "memberUids",
+        "memberNames",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "WorkspaceInvite": {
+      "title": "WorkspaceInvite",
+      "description": "Invite lookup document keyed by invite code so teammates can join a shared workspace.",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string",
+          "description": "Target workspace document ID."
+        },
+        "workspaceName": {
+          "type": "string",
+          "description": "Target workspace display name."
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Workspace creator UID."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp (FieldValue.serverTimestamp())."
+        }
+      },
+      "required": [
+        "workspaceId",
+        "workspaceName",
+        "ownerId",
+        "createdAt"
+      ]
+    },
+    "SharedChecklistPeriod": {
+      "title": "SharedChecklistPeriod",
+      "description": "Team-shared monthly PJU inspection checklist sheet.",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string",
+          "description": "Parent workspace document ID."
+        },
+        "memberUids": {
+          "type": "array",
+          "description": "Denormalized member UIDs from the workspace for rule-enforced list queries."
+        },
+        "updatedByUid": {
+          "type": "string",
+          "description": "UID of the last member who modified this checklist."
+        },
+        "updatedByName": {
+          "type": "string",
+          "description": "Display name of the last member who modified this checklist."
         },
         "month": {
           "type": "string",
@@ -27,7 +115,7 @@
         },
         "generalNotes": {
           "type": "string",
-          "description": "Freeform patrol notes from the officer."
+          "description": "Shared patrol notes."
         },
         "picName": {
           "type": "string",
@@ -36,16 +124,19 @@
         "createdAt": {
           "type": "string",
           "format": "date-time",
-          "description": "Server timestamp (FieldValue.serverTimestamp()) when period sheet was created."
+          "description": "Server timestamp (FieldValue.serverTimestamp())."
         },
         "updatedAt": {
           "type": "string",
           "format": "date-time",
-          "description": "Server timestamp (FieldValue.serverTimestamp()) when period sheet was last updated."
+          "description": "Server timestamp (FieldValue.serverTimestamp())."
         }
       },
       "required": [
-        "userId",
+        "workspaceId",
+        "memberUids",
+        "updatedByUid",
+        "updatedByName",
         "month",
         "year",
         "checks",
@@ -56,22 +147,34 @@
         "updatedAt"
       ]
     },
-    "PjuIssue": {
-      "title": "PjuIssue",
-      "description": "Structured PJU malfunction or maintenance issue report logged during patrol.",
+    "SharedPjuIssue": {
+      "title": "SharedPjuIssue",
+      "description": "Team-shared structured PJU malfunction or maintenance issue report.",
       "type": "object",
       "properties": {
-        "userId": {
+        "workspaceId": {
           "type": "string",
-          "description": "Authenticated owner UID matching Firebase Auth."
+          "description": "Parent workspace document ID."
         },
         "periodId": {
           "type": "string",
           "description": "Parent period document ID (e.g. '2026_NOVEMBER')."
         },
+        "memberUids": {
+          "type": "array",
+          "description": "Denormalized member UIDs from the workspace for rule-enforced list queries."
+        },
+        "createdByUid": {
+          "type": "string",
+          "description": "UID of the member who created the issue."
+        },
+        "createdByName": {
+          "type": "string",
+          "description": "Display name of the member who created the issue."
+        },
         "date": {
           "type": "integer",
-          "description": "Day of the month (1..31) when issue was observed."
+          "description": "Day of the month (1..31)."
         },
         "clusterId": {
           "type": "integer",
@@ -79,7 +182,7 @@
         },
         "clusterName": {
           "type": "string",
-          "description": "Cluster name (e.g. 'PJU KRISAN')."
+          "description": "Cluster name."
         },
         "unit": {
           "type": "string",
@@ -87,7 +190,7 @@
         },
         "desc": {
           "type": "string",
-          "description": "Description of the PJU issue."
+          "description": "Description of the issue."
         },
         "status": {
           "type": "string",
@@ -97,17 +200,20 @@
         "createdAt": {
           "type": "string",
           "format": "date-time",
-          "description": "Server timestamp (FieldValue.serverTimestamp()) when issue was created."
+          "description": "Server timestamp (FieldValue.serverTimestamp())."
         },
         "updatedAt": {
           "type": "string",
           "format": "date-time",
-          "description": "Server timestamp (FieldValue.serverTimestamp()) when issue was last updated."
+          "description": "Server timestamp (FieldValue.serverTimestamp())."
         }
       },
       "required": [
-        "userId",
+        "workspaceId",
         "periodId",
+        "memberUids",
+        "createdByUid",
+        "createdByName",
         "date",
         "clusterId",
         "clusterName",
@@ -117,16 +223,121 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Real-time team coordination chat message inside a shared workspace.",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string",
+          "description": "Parent workspace document ID."
+        },
+        "memberUids": {
+          "type": "array",
+          "description": "Denormalized member UIDs from the workspace for rule-enforced list queries."
+        },
+        "senderId": {
+          "type": "string",
+          "description": "Authenticated sender UID."
+        },
+        "senderName": {
+          "type": "string",
+          "description": "Sender display name."
+        },
+        "senderEmail": {
+          "type": "string",
+          "description": "Sender email address."
+        },
+        "text": {
+          "type": "string",
+          "description": "Chat message body."
+        },
+        "tagCluster": {
+          "type": "string",
+          "description": "Optional cluster tag reference (empty string if none)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp (FieldValue.serverTimestamp())."
+        }
+      },
+      "required": [
+        "workspaceId",
+        "memberUids",
+        "senderId",
+        "senderName",
+        "senderEmail",
+        "text",
+        "tagCluster",
+        "createdAt"
+      ]
+    },
+    "ChecklistPeriod": {
+      "title": "ChecklistPeriod",
+      "description": "Legacy personal monthly PJU inspection checklist sheet.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "month": { "type": "string" },
+        "year": { "type": "integer" },
+        "checks": { "type": "object" },
+        "slotLabels": { "type": "object" },
+        "generalNotes": { "type": "string" },
+        "picName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "month", "year", "checks", "slotLabels", "generalNotes", "picName", "createdAt", "updatedAt"]
+    },
+    "PjuIssue": {
+      "title": "PjuIssue",
+      "description": "Legacy personal PJU issue report.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "periodId": { "type": "string" },
+        "date": { "type": "integer" },
+        "clusterId": { "type": "integer" },
+        "clusterName": { "type": "string" },
+        "unit": { "type": "string" },
+        "desc": { "type": "string" },
+        "status": { "type": "string", "enum": ["Belum Diperbaiki", "Dalam Proses", "Selesai Diperbaiki"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "periodId", "date", "clusterId", "clusterName", "unit", "desc", "status", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
+    "/workspaces/{workspaceId}": {
+      "schema": { "$ref": "#/entities/Workspace" },
+      "description": "Shared team workspace documents."
+    },
+    "/workspaceInvites/{inviteCode}": {
+      "schema": { "$ref": "#/entities/WorkspaceInvite" },
+      "description": "Invite code lookup documents for joining a workspace."
+    },
+    "/workspaces/{workspaceId}/periods/{periodId}": {
+      "schema": { "$ref": "#/entities/SharedChecklistPeriod" },
+      "description": "Shared monthly PJU checklist documents."
+    },
+    "/workspaces/{workspaceId}/periods/{periodId}/issues/{issueId}": {
+      "schema": { "$ref": "#/entities/SharedPjuIssue" },
+      "description": "Shared PJU issue reports."
+    },
+    "/workspaces/{workspaceId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessage" },
+      "description": "Live chat messages for team coordination."
+    },
     "/users/{userId}/periods/{periodId}": {
       "schema": { "$ref": "#/entities/ChecklistPeriod" },
-      "description": "User-scoped monthly PJU checklist period documents."
+      "description": "Legacy user-scoped monthly PJU checklist period documents."
     },
     "/users/{userId}/periods/{periodId}/issues/{issueId}": {
       "schema": { "$ref": "#/entities/PjuIssue" },
-      "description": "User-scoped PJU issue reports belonging to a specific monthly period."
+      "description": "Legacy user-scoped PJU issue reports."
     }
   }
 }

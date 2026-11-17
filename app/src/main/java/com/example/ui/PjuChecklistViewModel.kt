@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.PjuChecklistRepository
+import com.example.model.ChatMessage
 import com.example.model.ChecklistPeriod
 import com.example.model.DEFAULT_MONTH
 import com.example.model.DEFAULT_PIC_NAME
@@ -15,10 +16,12 @@ import com.example.model.LampStatus
 import com.example.model.PJU_CLUSTERS
 import com.example.model.PjuCluster
 import com.example.model.PjuIssue
+import com.example.model.TeamWorkspace
 import com.example.model.UiState
 import com.example.model.buildCellKey
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -32,9 +35,11 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -59,6 +64,7 @@ data class IssueDialogPrefill(
 )
 
 data class PjuDashboardData(
+    val workspace: TeamWorkspace,
     val period: ChecklistPeriod,
     val issues: List<PjuIssue>,
     val selection: PeriodSelection,
@@ -73,6 +79,8 @@ class PjuChecklistViewModel(
 
     private val _selection = MutableStateFlow(PeriodSelection())
     val selection: StateFlow<PeriodSelection> = _selection.asStateFlow()
+
+    private val _preferredWorkspaceId = MutableStateFlow<String?>(null)
 
     private val _generalNotesDraft = MutableStateFlow("")
     val generalNotesDraft: StateFlow<String> = _generalNotesDraft.asStateFlow()
@@ -89,30 +97,105 @@ class PjuChecklistViewModel(
     private val _isMutating = MutableStateFlow(false)
     val isMutating: StateFlow<Boolean> = _isMutating.asStateFlow()
 
+    private val _isSendingChat = MutableStateFlow(false)
+    val isSendingChat: StateFlow<Boolean> = _isSendingChat.asStateFlow()
+
     private var lastSyncedNotes = ""
     private var lastSyncedPic = DEFAULT_PIC_NAME
     private var activePeriodKey = ""
+    private var ensuredDefaultWorkspace = false
 
-    private val periodFlow = _selection
-        .map { it.month to it.year }
+    val workspaces: StateFlow<List<TeamWorkspace>> = repository.observeUserWorkspaces(currentUserId)
+        .onEach { list ->
+            if (list.isEmpty() && !ensuredDefaultWorkspace) {
+                ensuredDefaultWorkspace = true
+                viewModelScope.launch {
+                    val res = repository.ensureDefaultWorkspace(currentUserId)
+                    res.onSuccess { ws ->
+                        _preferredWorkspaceId.value = ws.id
+                    }.onFailure { err ->
+                        ensuredDefaultWorkspace = false
+                        _snackbarMessages.tryEmit(
+                            err.localizedMessage ?: "Gagal menyiapkan ruang tim online"
+                        )
+                    }
+                }
+            }
+        }
+        .catch { error ->
+            val firestoreError = generateSequence(error) { it.cause }
+                .filterIsInstance<FirebaseFirestoreException>()
+                .firstOrNull()
+            if (firestoreError == null && error is CancellationException) throw error
+            Log.w(TAG, "Error observing workspaces", firestoreError ?: error)
+            emit(emptyList())
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+            initialValue = emptyList()
+        )
+
+    val activeWorkspace: StateFlow<TeamWorkspace?> = combine(
+        workspaces,
+        _preferredWorkspaceId
+    ) { list, preferredId ->
+        if (list.isEmpty()) null
+        else list.firstOrNull { it.id == preferredId } ?: list.last()
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+        initialValue = null
+    )
+
+    private val activeWorkspaceFlow = activeWorkspace.filterNotNull()
+
+    private val periodFlow = combine(
+        activeWorkspaceFlow,
+        _selection.map { it.month to it.year }.distinctUntilChanged()
+    ) { ws, (month, year) -> Triple(ws, month, year) }
         .distinctUntilChanged()
-        .flatMapLatest { (month, year) ->
-            repository.observePeriod(currentUserId, month, year)
+        .flatMapLatest { (ws, month, year) ->
+            repository.observePeriod(ws, currentUserId, month, year)
         }
 
-    private val issuesFlow = _selection
-        .map { it.month to it.year }
+    private val issuesFlow = combine(
+        activeWorkspaceFlow,
+        _selection.map { it.month to it.year }.distinctUntilChanged()
+    ) { ws, (month, year) -> Triple(ws, month, year) }
         .distinctUntilChanged()
-        .flatMapLatest { (month, year) ->
-            repository.observeIssues(currentUserId, month, year)
+        .flatMapLatest { (ws, month, year) ->
+            repository.observeIssues(ws, currentUserId, month, year)
         }
+
+    val chatMessages: StateFlow<UiState<List<ChatMessage>>> = activeWorkspaceFlow
+        .distinctUntilChanged { a, b -> a.id == b.id }
+        .flatMapLatest { ws ->
+            repository.observeChatMessages(ws, currentUserId)
+        }
+        .map<List<ChatMessage>, UiState<List<ChatMessage>>> { UiState.Success(it) }
+        .catch { error ->
+            val firestoreError = generateSequence(error) { it.cause }
+                .filterIsInstance<FirebaseFirestoreException>()
+                .firstOrNull()
+            if (firestoreError == null && error is CancellationException) throw error
+            val rootError = firestoreError ?: error
+            Log.w(TAG, "Error observing live chat", rootError)
+            emit(UiState.Error(rootError.localizedMessage ?: "Gagal memuat live chat"))
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+            initialValue = UiState.Loading
+        )
 
     val uiState: StateFlow<UiState<PjuDashboardData>> = combine(
+        activeWorkspaceFlow,
         periodFlow,
         issuesFlow,
         _selection
-    ) { period, issues, sel ->
-        val periodKey = "${period.year}_${period.month}"
+    ) { ws, period, issues, sel ->
+        val periodKey = "${ws.id}_${period.year}_${period.month}"
         if (periodKey != activePeriodKey) {
             activePeriodKey = periodKey
             lastSyncedNotes = period.generalNotes
@@ -132,6 +215,7 @@ class PjuChecklistViewModel(
         val stats = computeStats(period, sel.todayDate)
         UiState.Success(
             PjuDashboardData(
+                workspace = ws,
                 period = period,
                 issues = issues,
                 selection = sel,
@@ -148,7 +232,7 @@ class PjuChecklistViewModel(
             Log.w(TAG, "Error observing checklist data", rootError)
             emit(UiState.Error(rootError.localizedMessage ?: "Gagal memuat data checklist PJU"))
         }
-        .flowOn(kotlinx.coroutines.Dispatchers.Default)
+        .flowOn(Dispatchers.Default)
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
@@ -160,10 +244,11 @@ class PjuChecklistViewModel(
             _generalNotesDraft
                 .debounce(650L)
                 .collect { draft ->
+                    val ws = activeWorkspace.value ?: return@collect
                     val sel = _selection.value
-                    val key = "${sel.year}_${sel.month}"
+                    val key = "${ws.id}_${sel.year}_${sel.month}"
                     if (key == activePeriodKey && draft != lastSyncedNotes) {
-                        val result = repository.updateGeneralNotes(currentUserId, sel.month, sel.year, draft)
+                        val result = repository.updateGeneralNotes(ws, currentUserId, sel.month, sel.year, draft)
                         if (result.isSuccess) {
                             lastSyncedNotes = draft
                         } else {
@@ -179,11 +264,12 @@ class PjuChecklistViewModel(
             _picNameDraft
                 .debounce(650L)
                 .collect { draft ->
+                    val ws = activeWorkspace.value ?: return@collect
                     val sel = _selection.value
-                    val key = "${sel.year}_${sel.month}"
+                    val key = "${ws.id}_${sel.year}_${sel.month}"
                     val trimmed = draft.trim()
                     if (key == activePeriodKey && trimmed != lastSyncedPic) {
-                        val result = repository.updatePicName(currentUserId, sel.month, sel.year, trimmed)
+                        val result = repository.updatePicName(ws, currentUserId, sel.month, sel.year, trimmed)
                         if (result.isSuccess) {
                             lastSyncedPic = trimmed
                         } else {
@@ -193,6 +279,87 @@ class PjuChecklistViewModel(
                         }
                     }
                 }
+        }
+
+        // Automatically sync memberUids onto period, issues, and messages when a new member joins
+        viewModelScope.launch {
+            combine(
+                uiState,
+                chatMessages
+            ) { dashState, chatState ->
+                val dash = (dashState as? UiState.Success)?.data
+                val msgs = (chatState as? UiState.Success)?.data.orEmpty()
+                dash to msgs
+            }.debounce(800L).collect { (dash, msgs) ->
+                if (dash != null) {
+                    repository.syncMemberListsOnWorkspaceDocs(
+                        workspace = dash.workspace,
+                        period = dash.period,
+                        issues = dash.issues,
+                        messages = msgs
+                    )
+                }
+            }
+        }
+    }
+
+    fun selectWorkspace(workspaceId: String) {
+        _preferredWorkspaceId.value = workspaceId
+    }
+
+    fun joinWorkspace(inviteCode: String, onDone: (Boolean) -> Unit = {}) {
+        viewModelScope.launch {
+            _isMutating.value = true
+            val result = repository.joinWorkspaceByCode(currentUserId, inviteCode)
+            _isMutating.value = false
+            result.onSuccess { ws ->
+                _preferredWorkspaceId.value = ws.id
+                _snackbarMessages.tryEmit("Berhasil bergabung ke ${ws.name}")
+                onDone(true)
+            }.onFailure { err ->
+                _snackbarMessages.tryEmit(err.localizedMessage ?: "Gagal bergabung ke tim")
+                onDone(false)
+            }
+        }
+    }
+
+    fun createWorkspace(name: String, onDone: (Boolean) -> Unit = {}) {
+        viewModelScope.launch {
+            _isMutating.value = true
+            val result = repository.createWorkspace(currentUserId, name)
+            _isMutating.value = false
+            result.onSuccess { ws ->
+                _preferredWorkspaceId.value = ws.id
+                _snackbarMessages.tryEmit("Tim baru \"${ws.name}\" siap digunakan (Kode: ${ws.inviteCode})")
+                onDone(true)
+            }.onFailure { err ->
+                _snackbarMessages.tryEmit(err.localizedMessage ?: "Gagal membuat tim baru")
+                onDone(false)
+            }
+        }
+    }
+
+    fun sendChatMessage(text: String, tagCluster: String = "", onSent: () -> Unit = {}) {
+        val ws = activeWorkspace.value ?: return
+        viewModelScope.launch {
+            _isSendingChat.value = true
+            val result = repository.sendChatMessage(ws, currentUserId, text, tagCluster)
+            _isSendingChat.value = false
+            result.onSuccess {
+                onSent()
+            }.onFailure { err ->
+                _snackbarMessages.tryEmit(err.localizedMessage ?: "Gagal mengirim pesan")
+            }
+        }
+    }
+
+    fun deleteChatMessage(messageId: String) {
+        val ws = activeWorkspace.value ?: return
+        viewModelScope.launch {
+            val result = repository.deleteChatMessage(ws, currentUserId, messageId)
+            result.onFailure { err ->
+                _snackbarMessages.tryEmit(err.localizedMessage ?: "Gagal menghapus pesan")
+            }
         }
     }
 
@@ -225,11 +392,13 @@ class PjuChecklistViewModel(
     }
 
     fun toggleCellStatus(cluster: PjuCluster, slotIndex: Int, date: Int, period: ChecklistPeriod) {
+        val ws = activeWorkspace.value ?: return
         val currentCode = period.checks[buildCellKey(cluster.id, slotIndex, date)]
         val nextStatus = LampStatus.fromCode(currentCode).next()
         val sel = _selection.value
         viewModelScope.launch {
             val result = repository.setCellStatus(
+                workspace = ws,
                 userId = currentUserId,
                 month = sel.month,
                 year = sel.year,
@@ -258,10 +427,12 @@ class PjuChecklistViewModel(
     }
 
     fun saveSlotLabels(clusterId: Int, labels: List<String>) {
+        val ws = activeWorkspace.value ?: return
         val sel = _selection.value
         viewModelScope.launch {
             _isMutating.value = true
             val result = repository.updateSlotLabels(
+                workspace = ws,
                 userId = currentUserId,
                 month = sel.month,
                 year = sel.year,
@@ -286,10 +457,12 @@ class PjuChecklistViewModel(
         desc: String,
         status: IssueStatus
     ) {
+        val ws = activeWorkspace.value ?: return
         val sel = _selection.value
         viewModelScope.launch {
             _isMutating.value = true
             val result = repository.addIssue(
+                workspace = ws,
                 userId = currentUserId,
                 month = sel.month,
                 year = sel.year,
@@ -312,9 +485,11 @@ class PjuChecklistViewModel(
     }
 
     fun cycleIssueStatus(issue: PjuIssue) {
+        val ws = activeWorkspace.value ?: return
         val sel = _selection.value
         viewModelScope.launch {
             val result = repository.cycleIssueStatus(
+                workspace = ws,
                 userId = currentUserId,
                 month = sel.month,
                 year = sel.year,
@@ -329,9 +504,11 @@ class PjuChecklistViewModel(
     }
 
     fun deleteIssue(issueId: String) {
+        val ws = activeWorkspace.value ?: return
         val sel = _selection.value
         viewModelScope.launch {
             val result = repository.deleteIssue(
+                workspace = ws,
                 userId = currentUserId,
                 month = sel.month,
                 year = sel.year,
@@ -348,10 +525,11 @@ class PjuChecklistViewModel(
     }
 
     fun resetCurrentPeriod() {
+        val ws = activeWorkspace.value ?: return
         val sel = _selection.value
         viewModelScope.launch {
             _isMutating.value = true
-            val result = repository.resetPeriod(currentUserId, sel.month, sel.year)
+            val result = repository.resetPeriod(ws, currentUserId, sel.month, sel.year)
             _isMutating.value = false
             if (result.isSuccess) {
                 lastSyncedNotes = ""

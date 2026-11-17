@@ -1,5 +1,6 @@
 package com.example.auth
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,9 +22,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Lightbulb
-import androidx.compose.material.icons.filled.ReportProblem
-import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -47,8 +48,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -56,9 +59,9 @@ import androidx.compose.ui.unit.dp
 import androidx.credentials.CredentialManager
 import com.example.R
 import com.example.ui.theme.Amber500
+import com.example.ui.theme.Blue600
 import com.example.ui.theme.Emerald600
 import com.example.ui.theme.Rose600
-import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
 import com.example.ui.theme.Slate950
 import kotlinx.coroutines.delay
@@ -74,7 +77,6 @@ fun AuthScreen(
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    // Wait until the first frame completes and window sync settles before launching Credential Manager
     LaunchedEffect(Unit) {
         withFrameNanos { }
         delay(250L)
@@ -88,19 +90,36 @@ fun AuthScreen(
     }
 
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(Slate950, Slate900, Slate800)
-                )
-            )
-            .statusBarsPadding()
-            .navigationBarsPadding(),
+        modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
+        // User-provided Perumahan Bumi Papan Selaras roundabout background photo
+        Image(
+            painter = painterResource(id = R.drawable.bg_bps_roundabout),
+            contentDescription = "Gerbang Bundaran Perumahan Bumi Papan Selaras",
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize()
+        )
+
+        // Atmospheric translucent scrim keeping monument visible and text sharp
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Slate950.copy(alpha = 0.62f),
+                            Slate900.copy(alpha = 0.72f),
+                            Slate950.copy(alpha = 0.88f)
+                        )
+                    )
+                )
+        )
+
         Column(
             modifier = Modifier
+                .statusBarsPadding()
+                .navigationBarsPadding()
                 .widthIn(max = 480.dp)
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
@@ -113,7 +132,7 @@ fun AuthScreen(
                     .clip(CircleShape)
                     .background(
                         Brush.radialGradient(
-                            colors = listOf(Amber500.copy(alpha = 0.28f), Amber500.copy(alpha = 0.08f))
+                            colors = listOf(Amber500.copy(alpha = 0.34f), Amber500.copy(alpha = 0.10f))
                         )
                     ),
                 contentAlignment = Alignment.Center
@@ -134,17 +153,17 @@ fun AuthScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
             Text(
-                text = "PJU CHECKLIST DIGITAL",
-                style = MaterialTheme.typography.headlineSmall,
+                text = "PJU BPS",
+                style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.ExtraBold,
                 color = Color.White,
                 textAlign = TextAlign.Center
             )
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
             Text(
                 text = "PERUMAHAN BUMI PAPAN SELARAS",
@@ -153,12 +172,12 @@ fun AuthScreen(
                 textAlign = TextAlign.Center
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(22.dp))
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.06f))
+                colors = CardDefaults.cardColors(containerColor = Slate950.copy(alpha = 0.68f))
             ) {
                 Column(
                     modifier = Modifier.padding(18.dp),
@@ -167,25 +186,25 @@ fun AuthScreen(
                     FeatureHighlightRow(
                         icon = Icons.Filled.CheckCircle,
                         tint = Emerald600,
-                        title = "Checklist 9 Cluster x 3 Titik",
+                        title = "Checklist PJU 9 Cluster",
                         subtitle = "Catat status Menyala (✔), Redup (⚠), atau Mati (✖) per tanggal."
                     )
                     FeatureHighlightRow(
-                        icon = Icons.Filled.Schedule,
-                        tint = Amber500,
-                        title = "Pantau Kepatuhan Maks. 2 Hari",
-                        subtitle = "Peringatan otomatis untuk cluster yang belum dicek dalam 2 hari."
+                        icon = Icons.Filled.Groups,
+                        tint = Blue600,
+                        title = "Pakai Bersama Online",
+                        subtitle = "Gabung satu tim dengan Kode Tim agar seluruh anggota melihat update real-time."
                     )
                     FeatureHighlightRow(
-                        icon = Icons.Filled.ReportProblem,
-                        tint = Rose600,
-                        title = "Laporan Masalah & Export CSV/Cetak",
-                        subtitle = "Sinkronisasi cloud aman & ekspor laporan patroli siap cetak."
+                        icon = Icons.Filled.Forum,
+                        tint = Amber500,
+                        title = "Live Chat Koordinasi",
+                        subtitle = "Diskusi langsung antar petugas & pengurus lengkap dengan tag cluster."
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(22.dp))
 
             if (errorMessage != null) {
                 Surface(
@@ -193,7 +212,7 @@ fun AuthScreen(
                         .fillMaxWidth()
                         .padding(bottom = 12.dp),
                     shape = RoundedCornerShape(12.dp),
-                    color = Rose600.copy(alpha = 0.18f)
+                    color = Rose600.copy(alpha = 0.28f)
                 ) {
                     Text(
                         text = errorMessage ?: "",
@@ -261,9 +280,9 @@ fun AuthScreen(
             Spacer(modifier = Modifier.height(12.dp))
 
             Text(
-                text = "Data checklist tersimpan aman di akun Google Anda.",
+                text = "Sinkronisasi data internet aman dengan akun Google Anda.",
                 style = MaterialTheme.typography.bodySmall,
-                color = Color.White.copy(alpha = 0.65f),
+                color = Color.White.copy(alpha = 0.78f),
                 textAlign = TextAlign.Center
             )
         }
@@ -283,7 +302,7 @@ private fun FeatureHighlightRow(
     ) {
         Surface(
             shape = RoundedCornerShape(10.dp),
-            color = tint.copy(alpha = 0.16f),
+            color = tint.copy(alpha = 0.22f),
             modifier = Modifier.size(36.dp)
         ) {
             Box(contentAlignment = Alignment.Center) {
@@ -305,7 +324,7 @@ private fun FeatureHighlightRow(
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.bodySmall,
-                color = Color.White.copy(alpha = 0.72f)
+                color = Color.White.copy(alpha = 0.78f)
             )
         }
     }

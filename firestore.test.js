@@ -10,7 +10,7 @@ let testEnv;
 const PROJECT_ID = process.env.GCP_PROJECT || "demo-no-project";
 const ALICE_UID = "alice_123";
 const BOB_UID = "bob_456";
-const PERIOD_ID = "2026_NOVEMBER";
+const CHARLIE_UID = "charlie_789";
 
 const [emulatorHost, emulatorPortStr] = (
   process.env.FIRESTORE_EMULATOR_HOST || "127.0.0.1:8085"
@@ -41,231 +41,160 @@ beforeEach(async () => {
   }
 });
 
-test("Unauthenticated user: cannot read or write periods or issues", async () => {
+test("Unauthenticated user cannot read or write workspaces or invites", async () => {
   const unauthDb = testEnv.unauthenticatedContext().firestore();
+  await assertFails(unauthDb.collection("workspaces").get());
+  await assertFails(unauthDb.collection("workspaceInvites").doc("BPS2026").get());
   await assertFails(
-    unauthDb.collection("users").doc(ALICE_UID).collection("periods").get()
-  );
-  await assertFails(
-    unauthDb
-      .collection("users")
-      .doc(ALICE_UID)
-      .collection("periods")
-      .doc(PERIOD_ID)
-      .set({
-        userId: ALICE_UID,
-        month: "NOVEMBER",
-        year: 2026,
-        checks: {},
-        slotLabels: {},
-        generalNotes: "",
-        picName: "R. MOH. GANDI / NERI WELAS ANTORO",
-        createdAt: new Date(Date.now() - 1000),
-        updatedAt: new Date(Date.now() - 1000),
-      })
+    unauthDb.collection("workspaces").doc("ws_1").collection("messages").get()
   );
 });
 
-test("Authenticated owner: valid period create, dot-notation cell update, notes update, and delete", async () => {
+test("Workspace creation, invite lookup, joining by invite code, and non-member isolation", async () => {
   const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
-  const created = new Date(Date.now() - 10000);
-  const periodRef = aliceDb
-    .collection("users")
-    .doc(ALICE_UID)
-    .collection("periods")
-    .doc(PERIOD_ID);
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const charlieDb = testEnv.authenticatedContext(CHARLIE_UID).firestore();
+  const now = new Date(Date.now() - 2000);
 
-  await assertSucceeds(
-    periodRef.set({
-      userId: ALICE_UID,
-      month: "NOVEMBER",
-      year: 2026,
-      checks: { "1_0_17": "normal" },
-      slotLabels: { "1": ["PJU 01", "PJU 02", "PJU 03"] },
-      generalNotes: "Patroli malam lancar",
-      picName: "R. MOH. GANDI / NERI WELAS ANTORO",
-      createdAt: created,
-      updatedAt: created,
-    })
-  );
-
-  // Partial update mirroring Kotlin dot-notation cell update
-  await assertSucceeds(
-    periodRef.update({
-      "checks.2_1_17": "error",
-      updatedAt: new Date(Date.now() - 1000),
-    })
-  );
-
-  // Reject ghost field on create
-  await assertFails(
-    aliceDb
-      .collection("users")
-      .doc(ALICE_UID)
-      .collection("periods")
-      .doc("2026_DESEMBER")
-      .set({
-        id: "2026_DESEMBER",
-        userId: ALICE_UID,
-        month: "DESEMBER",
-        year: 2026,
-        checks: {},
-        slotLabels: {},
-        generalNotes: "",
-        picName: "GANDI",
-        createdAt: created,
-        updatedAt: created,
-      })
-  );
-
-  // Reject immutable createdAt / month change on update
-  await assertFails(
-    periodRef.update({
-      month: "DESEMBER",
-      updatedAt: new Date(Date.now() - 500),
-    })
-  );
-  await assertFails(
-    periodRef.update({
-      createdAt: new Date(Date.now() - 500),
-      updatedAt: new Date(Date.now() - 500),
-    })
-  );
-
-  // Reject future timestamp
-  await assertFails(
-    periodRef.update({
-      generalNotes: "Future",
-      updatedAt: new Date(Date.now() + 60000),
-    })
-  );
-});
-
-test("Authenticated owner: issues subcollection create, update status, list, and delete", async () => {
-  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
-  const created = new Date(Date.now() - 10000);
-  const periodRef = aliceDb
-    .collection("users")
-    .doc(ALICE_UID)
-    .collection("periods")
-    .doc(PERIOD_ID);
-
-  const issueRef = periodRef.collection("issues").doc("issue_1");
-
-  // Empty list query on subcollection succeeds
-  await assertSucceeds(periodRef.collection("issues").get());
-
-  // Atomic batch creating period + issue (existsAfter check)
   const batch = aliceDb.batch();
-  batch.set(periodRef, {
-    userId: ALICE_UID,
-    month: "NOVEMBER",
-    year: 2026,
-    checks: {},
-    slotLabels: {},
-    generalNotes: "",
-    picName: "R. MOH. GANDI / NERI WELAS ANTORO",
-    createdAt: created,
-    updatedAt: created,
+  const wsRef = aliceDb.collection("workspaces").doc("ws_bps");
+  const inviteRef = aliceDb.collection("workspaceInvites").doc("BPS2026");
+
+  batch.set(wsRef, {
+    name: "Tim PJU BPS",
+    ownerId: ALICE_UID,
+    inviteCode: "BPS2026",
+    memberUids: [ALICE_UID],
+    memberNames: { [ALICE_UID]: "Alice" },
+    createdAt: now,
+    updatedAt: now,
   });
-  batch.set(issueRef, {
-    userId: ALICE_UID,
-    periodId: PERIOD_ID,
-    date: 17,
-    clusterId: 2,
-    clusterName: "PJU CEMPAKA",
-    unit: "Titik 1 / Gerbang",
-    desc: "Lampu mati total, MCB turun",
-    status: "Belum Diperbaiki",
-    createdAt: created,
-    updatedAt: created,
+  batch.set(inviteRef, {
+    workspaceId: "ws_bps",
+    workspaceName: "Tim PJU BPS",
+    ownerId: ALICE_UID,
+    createdAt: now,
   });
   await assertSucceeds(batch.commit());
 
-  // Status update succeeds
+  // Listing invites must always fail
+  await assertFails(bobDb.collection("workspaceInvites").get());
+
+  // Bob looks up exact invite code and joins
+  await assertSucceeds(bobDb.collection("workspaceInvites").doc("BPS2026").get());
   await assertSucceeds(
-    issueRef.update({
-      status: "Dalam Proses",
+    bobDb.collection("workspaces").doc("ws_bps").update({
+      memberUids: [ALICE_UID, BOB_UID],
+      memberNames: { [ALICE_UID]: "Alice", [BOB_UID]: "Bob" },
       updatedAt: new Date(Date.now() - 1000),
     })
   );
 
-  // Invalid status fails
-  await assertFails(
-    issueRef.update({
-      status: "Status Tidak Valid",
-      updatedAt: new Date(Date.now() - 500),
-    })
+  // Filtered workspace list query works for Bob, fails for non-member Charlie
+  await assertSucceeds(
+    bobDb.collection("workspaces").where("memberUids", "array-contains", BOB_UID).get()
   );
-
-  // Delete succeeds
-  await assertSucceeds(issueRef.delete());
+  await assertFails(
+    charlieDb.collection("workspaces").where("memberUids", "array-contains", ALICE_UID).get()
+  );
+  await assertFails(charlieDb.collection("workspaces").doc("ws_bps").get());
 });
 
-test("Cross-user isolation: Alice cannot read or write Bob's periods or issues", async () => {
+test("Shared checklist period, issue creation, and live chat messages work for members only", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const charlieDb = testEnv.authenticatedContext(CHARLIE_UID).firestore();
+  const now = new Date(Date.now() - 5000);
+
   await testEnv.withSecurityRulesDisabled(async (context) => {
-    const bobPeriodRef = context
-      .firestore()
-      .collection("users")
-      .doc(BOB_UID)
-      .collection("periods")
-      .doc(PERIOD_ID);
-    const created = new Date(Date.now() - 10000);
-    await bobPeriodRef.set({
-      userId: BOB_UID,
-      month: "NOVEMBER",
-      year: 2026,
-      checks: {},
-      slotLabels: {},
-      generalNotes: "Bob note",
-      picName: "Bob",
-      createdAt: created,
-      updatedAt: created,
-    });
-    await bobPeriodRef.collection("issues").doc("bob_issue").set({
-      userId: BOB_UID,
-      periodId: PERIOD_ID,
-      date: 17,
-      clusterId: 1,
-      clusterName: "PJU KRISAN",
-      unit: "Titik 1",
-      desc: "Redup",
-      status: "Belum Diperbaiki",
-      createdAt: created,
-      updatedAt: created,
+    const db = context.firestore();
+    await db.collection("workspaces").doc("ws_bps").set({
+      name: "Tim PJU BPS",
+      ownerId: ALICE_UID,
+      inviteCode: "BPS2026",
+      memberUids: [ALICE_UID, BOB_UID],
+      memberNames: { [ALICE_UID]: "Alice", [BOB_UID]: "Bob" },
+      createdAt: now,
+      updatedAt: now,
     });
   });
 
-  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
-  await assertFails(
-    aliceDb.collection("users").doc(BOB_UID).collection("periods").get()
+  // Alice creates shared period + issue atomically
+  const batch = aliceDb.batch();
+  const periodRef = aliceDb.collection("workspaces").doc("ws_bps").collection("periods").doc("2026_NOVEMBER");
+  const issueRef = periodRef.collection("issues").doc("iss_1");
+  batch.set(periodRef, {
+    workspaceId: "ws_bps",
+    memberUids: [ALICE_UID, BOB_UID],
+    updatedByUid: ALICE_UID,
+    updatedByName: "Alice",
+    month: "NOVEMBER",
+    year: 2026,
+    checks: { "1_0_17": "error" },
+    slotLabels: {},
+    generalNotes: "",
+    picName: "R. MOH. GANDI / NERI WELAS ANTORO",
+    createdAt: now,
+    updatedAt: now,
+  });
+  batch.set(issueRef, {
+    workspaceId: "ws_bps",
+    periodId: "2026_NOVEMBER",
+    memberUids: [ALICE_UID, BOB_UID],
+    createdByUid: ALICE_UID,
+    createdByName: "Alice",
+    date: 17,
+    clusterId: 1,
+    clusterName: "PJU KRISAN",
+    unit: "Tiang 1",
+    desc: "Mati total",
+    status: "Belum Diperbaiki",
+    createdAt: now,
+    updatedAt: now,
+  });
+  await assertSucceeds(batch.commit());
+
+  // Bob (teammate) can read period, query issues, update check, and send live chat message
+  await assertSucceeds(
+    bobDb.collection("workspaces").doc("ws_bps").collection("periods").doc("2026_NOVEMBER").get()
+  );
+  await assertSucceeds(
+    bobDb.collection("workspaces").doc("ws_bps").collection("periods").doc("2026_NOVEMBER")
+      .collection("issues").where("memberUids", "array-contains", BOB_UID).get()
+  );
+  await assertSucceeds(
+    bobDb.collection("workspaces").doc("ws_bps").collection("messages").doc("msg_1").set({
+      workspaceId: "ws_bps",
+      memberUids: [ALICE_UID, BOB_UID],
+      senderId: BOB_UID,
+      senderName: "Bob",
+      senderEmail: "bob@example.com",
+      text: "Sudah saya cek tiang 1 Krisan",
+      tagCluster: "PJU KRISAN",
+      createdAt: new Date(Date.now() - 1000),
+    })
+  );
+
+  // Bob can query messages scoped to memberUids; Charlie cannot
+  await assertSucceeds(
+    bobDb.collection("workspaces").doc("ws_bps").collection("messages")
+      .where("memberUids", "array-contains", BOB_UID).get()
   );
   await assertFails(
-    aliceDb
-      .collection("users")
-      .doc(BOB_UID)
-      .collection("periods")
-      .doc(PERIOD_ID)
-      .get()
+    charlieDb.collection("workspaces").doc("ws_bps").collection("messages")
+      .where("memberUids", "array-contains", BOB_UID).get()
   );
+  // Bob cannot spoof Alice's senderId
   await assertFails(
-    aliceDb
-      .collection("users")
-      .doc(BOB_UID)
-      .collection("periods")
-      .doc(PERIOD_ID)
-      .update({
-        generalNotes: "Hijack",
-        updatedAt: new Date(Date.now() - 1000),
-      })
-  );
-  await assertFails(
-    aliceDb
-      .collection("users")
-      .doc(BOB_UID)
-      .collection("periods")
-      .doc(PERIOD_ID)
-      .collection("issues")
-      .get()
+    bobDb.collection("workspaces").doc("ws_bps").collection("messages").doc("msg_spoof").set({
+      workspaceId: "ws_bps",
+      memberUids: [ALICE_UID, BOB_UID],
+      senderId: ALICE_UID,
+      senderName: "Alice",
+      senderEmail: "alice@example.com",
+      text: "Palsu",
+      tagCluster: "",
+      createdAt: new Date(Date.now() - 1000),
+    })
   );
 });

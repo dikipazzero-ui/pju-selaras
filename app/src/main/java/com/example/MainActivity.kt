@@ -62,7 +62,10 @@ fun AppNavigation() {
                     }
                 }
             )
-            PjuMainScreen(viewModel = viewModel)
+            PjuMainScreen(
+                viewModel = viewModel,
+                currentUserId = user.uid
+            )
         }
     }
 }

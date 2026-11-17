@@ -10,6 +10,7 @@ const val DEFAULT_PIC_NAME = "R. MOH. GANDI / NERI WELAS ANTORO"
 const val DEFAULT_MONTH = "NOVEMBER"
 const val DEFAULT_YEAR = 2026
 const val DEFAULT_TODAY_DATE = 17
+const val DEFAULT_WORKSPACE_NAME = "Tim PJU Bumi Papan Selaras"
 
 val INDONESIAN_MONTHS = listOf(
     "JANUARI",
@@ -102,8 +103,25 @@ enum class DateRangePreset(
 
 @Keep
 @IgnoreExtraProperties
+data class TeamWorkspace(
+    @DocumentId val id: String = "",
+    val name: String = DEFAULT_WORKSPACE_NAME,
+    val ownerId: String = "",
+    val inviteCode: String = "",
+    val memberUids: List<String> = emptyList(),
+    val memberNames: Map<String, String> = emptyMap(),
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+@Keep
+@IgnoreExtraProperties
 data class ChecklistPeriod(
     @DocumentId val id: String = "",
+    val workspaceId: String = "",
+    val memberUids: List<String> = emptyList(),
+    val updatedByUid: String = "",
+    val updatedByName: String = "",
     val userId: String = "",
     val month: String = DEFAULT_MONTH,
     val year: Long = DEFAULT_YEAR.toLong(),
@@ -119,8 +137,12 @@ data class ChecklistPeriod(
 @IgnoreExtraProperties
 data class PjuIssue(
     @DocumentId val id: String = "",
-    val userId: String = "",
+    val workspaceId: String = "",
     val periodId: String = "",
+    val memberUids: List<String> = emptyList(),
+    val createdByUid: String = "",
+    val createdByName: String = "",
+    val userId: String = "",
     val date: Long = DEFAULT_TODAY_DATE.toLong(),
     val clusterId: Long = 1L,
     val clusterName: String = PJU_CLUSTERS.first().name,
@@ -129,6 +151,20 @@ data class PjuIssue(
     val status: String = IssueStatus.BELUM.label,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+@Keep
+@IgnoreExtraProperties
+data class ChatMessage(
+    @DocumentId val id: String = "",
+    val workspaceId: String = "",
+    val memberUids: List<String> = emptyList(),
+    val senderId: String = "",
+    val senderName: String = "",
+    val senderEmail: String = "",
+    val text: String = "",
+    val tagCluster: String = "",
+    @ServerTimestamp val createdAt: Timestamp? = null
 )
 
 sealed interface UiState<out T> {

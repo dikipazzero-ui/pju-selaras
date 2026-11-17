@@ -2,11 +2,16 @@ package com.example.data
 
 import android.content.Context
 import com.example.R
+import com.example.model.ChatMessage
 import com.example.model.ChecklistPeriod
+import com.example.model.DEFAULT_MONTH
 import com.example.model.DEFAULT_PIC_NAME
+import com.example.model.DEFAULT_WORKSPACE_NAME
+import com.example.model.DEFAULT_YEAR
 import com.example.model.IssueStatus
 import com.example.model.LampStatus
 import com.example.model.PjuIssue
+import com.example.model.TeamWorkspace
 import com.example.model.buildCellKey
 import com.example.model.buildPeriodId
 import com.google.firebase.Firebase
@@ -16,7 +21,6 @@ import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
-import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.snapshots
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
@@ -25,6 +29,7 @@ import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.tasks.await
+import kotlin.random.Random
 
 class PjuChecklistRepository(
     private val db: FirebaseFirestore,
@@ -43,34 +48,356 @@ class PjuChecklistRepository(
         return uid
     }
 
-    private fun periodDocRef(userId: String, periodId: String) =
-        db.collection("users").document(userId)
-            .collection("periods").document(periodId)
+    private fun currentDisplayName(): String {
+        val user = auth.currentUser
+        val raw = user?.displayName?.takeIf { it.isNotBlank() }
+            ?: user?.email?.substringBefore('@')?.takeIf { it.isNotBlank() }
+            ?: "Petugas PJU"
+        return raw.trim().take(80)
+    }
+
+    private fun currentEmail(): String {
+        return auth.currentUser?.email?.trim()?.take(120) ?: ""
+    }
+
+    private fun workspaceRef(workspaceId: String) =
+        db.collection("workspaces").document(workspaceId)
+
+    private fun periodDocRef(workspaceId: String, periodId: String) =
+        workspaceRef(workspaceId).collection("periods").document(periodId)
+
+    private fun messagesCollection(workspaceId: String) =
+        workspaceRef(workspaceId).collection("messages")
+
+    private fun generateInviteCode(): String {
+        val alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+        val suffix = (1..4).map { alphabet[Random.nextInt(alphabet.length)] }.joinToString("")
+        return "BPS$suffix"
+    }
 
     private fun initialPeriodPayload(
-        userId: String,
+        workspace: TeamWorkspace,
+        actorUid: String,
+        actorName: String,
         month: String,
         year: Int,
         checks: Map<String, String> = emptyMap(),
         slotLabels: Map<String, List<String>> = emptyMap(),
         generalNotes: String = "",
         picName: String = DEFAULT_PIC_NAME
-    ): Map<String, Any> = mapOf(
-        "userId" to userId,
-        "month" to month.uppercase(),
-        "year" to year.toLong(),
-        "checks" to checks,
-        "slotLabels" to slotLabels,
-        "generalNotes" to generalNotes.take(2000),
-        "picName" to picName.take(150),
-        "createdAt" to FieldValue.serverTimestamp(),
-        "updatedAt" to FieldValue.serverTimestamp()
-    )
+    ): Map<String, Any> {
+        val members = workspace.memberUids.ifEmpty { listOf(actorUid) }.take(50)
+        return mapOf(
+            "workspaceId" to workspace.id,
+            "memberUids" to members,
+            "updatedByUid" to actorUid,
+            "updatedByName" to actorName.take(80).ifBlank { "Petugas PJU" },
+            "month" to month.uppercase(),
+            "year" to year.toLong(),
+            "checks" to checks,
+            "slotLabels" to slotLabels,
+            "generalNotes" to generalNotes.take(2000),
+            "picName" to picName.take(150),
+            "createdAt" to FieldValue.serverTimestamp(),
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+    }
 
-    fun observePeriod(userId: String, month: String, year: Int): Flow<ChecklistPeriod> = flow {
+    fun observeUserWorkspaces(userId: String): Flow<List<TeamWorkspace>> = flow {
+        val uid = requireUserId(userId)
+        val query = db.collection("workspaces").whereArrayContains("memberUids", uid)
+        emitAll(
+            query.snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(
+                        TeamWorkspace::class.java,
+                        DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                    ).sortedBy { it.createdAt?.toDate()?.time ?: Long.MAX_VALUE }
+                }
+                .catch { error ->
+                    val firestoreError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (firestoreError == null && error is CancellationException) throw error
+                    val exceptionToLog = firestoreError ?: (error as? Exception)
+                    if (exceptionToLog != null && auth.currentUser?.uid == uid) {
+                        handleFirestoreError(exceptionToLog, OperationType.LIST, "workspaces")
+                    }
+                    throw error
+                }
+        )
+    }
+
+    suspend fun ensureDefaultWorkspace(userId: String): Result<TeamWorkspace> {
+        val uid = try {
+            requireUserId(userId)
+        } catch (e: Exception) {
+            return Result.failure(e)
+        }
+        return try {
+            val existing = db.collection("workspaces")
+                .whereArrayContains("memberUids", uid)
+                .get()
+                .await()
+                .toObjects(
+                    TeamWorkspace::class.java,
+                    DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                )
+            if (existing.isNotEmpty()) {
+                return Result.success(existing.first())
+            }
+            val created = createWorkspaceInternal(uid, DEFAULT_WORKSPACE_NAME, migrateLegacy = true)
+            Result.success(created)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, "workspaces")
+            Result.failure(e)
+        }
+    }
+
+    suspend fun createWorkspace(userId: String, name: String): Result<TeamWorkspace> {
+        val uid = try {
+            requireUserId(userId)
+        } catch (e: Exception) {
+            return Result.failure(e)
+        }
+        return try {
+            val cleanName = name.trim().take(60)
+            require(cleanName.length >= 2) { "Nama tim minimal 2 karakter" }
+            val created = createWorkspaceInternal(uid, cleanName, migrateLegacy = false)
+            Result.success(created)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, "workspaces")
+            Result.failure(e)
+        }
+    }
+
+    private suspend fun createWorkspaceInternal(
+        uid: String,
+        name: String,
+        migrateLegacy: Boolean
+    ): TeamWorkspace {
+        val actorName = currentDisplayName()
+        var inviteCode = generateInviteCode()
+        for (attempt in 0 until 4) {
+            val existingInvite = db.collection("workspaceInvites").document(inviteCode).get().await()
+            if (!existingInvite.exists()) break
+            inviteCode = generateInviteCode()
+        }
+
+        val wsRef = db.collection("workspaces").document()
+        val inviteRef = db.collection("workspaceInvites").document(inviteCode)
+
+        val workspacePayload = mapOf(
+            "name" to name.take(60),
+            "ownerId" to uid,
+            "inviteCode" to inviteCode,
+            "memberUids" to listOf(uid),
+            "memberNames" to mapOf(uid to actorName),
+            "createdAt" to FieldValue.serverTimestamp(),
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+        val invitePayload = mapOf(
+            "workspaceId" to wsRef.id,
+            "workspaceName" to name.take(60),
+            "ownerId" to uid,
+            "createdAt" to FieldValue.serverTimestamp()
+        )
+
+        val batch = db.batch()
+        batch.set(wsRef, workspacePayload)
+        batch.set(inviteRef, invitePayload)
+
+        // If user had legacy personal checklist data for default period, copy it into the new workspace
+        if (migrateLegacy) {
+            val defaultPeriodId = buildPeriodId(DEFAULT_YEAR, DEFAULT_MONTH)
+            val legacyPeriodRef = db.collection("users").document(uid)
+                .collection("periods").document(defaultPeriodId)
+            val legacySnapshot = runCatching { legacyPeriodRef.get().await() }.getOrNull()
+            if (legacySnapshot != null && legacySnapshot.exists()) {
+                val legacy = legacySnapshot.toObject(ChecklistPeriod::class.java)
+                if (legacy != null) {
+                    val newPeriodRef = periodDocRef(wsRef.id, defaultPeriodId)
+                    val tempWs = TeamWorkspace(
+                        id = wsRef.id,
+                        name = name,
+                        ownerId = uid,
+                        inviteCode = inviteCode,
+                        memberUids = listOf(uid),
+                        memberNames = mapOf(uid to actorName)
+                    )
+                    batch.set(
+                        newPeriodRef,
+                        initialPeriodPayload(
+                            workspace = tempWs,
+                            actorUid = uid,
+                            actorName = actorName,
+                            month = legacy.month.ifBlank { DEFAULT_MONTH },
+                            year = legacy.year.toInt().takeIf { it in 2020..2100 } ?: DEFAULT_YEAR,
+                            checks = legacy.checks,
+                            slotLabels = legacy.slotLabels,
+                            generalNotes = legacy.generalNotes,
+                            picName = legacy.picName.ifBlank { DEFAULT_PIC_NAME }
+                        )
+                    )
+                }
+            }
+        }
+
+        batch.commit().await()
+        return TeamWorkspace(
+            id = wsRef.id,
+            name = name,
+            ownerId = uid,
+            inviteCode = inviteCode,
+            memberUids = listOf(uid),
+            memberNames = mapOf(uid to actorName)
+        )
+    }
+
+    suspend fun joinWorkspaceByCode(userId: String, rawCode: String): Result<TeamWorkspace> {
+        val code = rawCode.trim().uppercase()
+        var targetPath = "workspaceInvites/$code"
+        return try {
+            val uid = requireUserId(userId)
+            require(code.length in 4..16 && code.matches(Regex("^[A-Z0-9_\\-]+$"))) {
+                "Kode tim harus 4-16 huruf/angka (contoh: BPS2026)"
+            }
+
+            val inviteSnap = db.collection("workspaceInvites").document(code).get().await()
+            if (!inviteSnap.exists()) {
+                return Result.failure(IllegalArgumentException("Kode tim \"$code\" tidak ditemukan."))
+            }
+
+            val workspaceId = inviteSnap.getString("workspaceId")
+                ?.takeIf { it.isNotBlank() }
+                ?: return Result.failure(IllegalStateException("Data undangan tidak lengkap."))
+
+            val wsRef = workspaceRef(workspaceId)
+            targetPath = wsRef.path
+            val actorName = currentDisplayName()
+
+            // Try reading workspace first if already a member
+            val alreadyMemberSnap = runCatching { wsRef.get().await() }.getOrNull()
+            if (alreadyMemberSnap != null && alreadyMemberSnap.exists()) {
+                val existingWs = alreadyMemberSnap.toObject(
+                    TeamWorkspace::class.java,
+                    DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                )
+                if (existingWs != null && uid in existingWs.memberUids) {
+                    return Result.success(existingWs)
+                }
+            }
+
+            // Cannot read workspace before being a member, so fetch invite metadata and update atomically?
+            // Note: Security rules validate existing().memberUids + 1, so we use FieldValue.arrayUnion
+            // combined with map field update "memberNames.$uid"
+            wsRef.update(
+                mapOf(
+                    "memberUids" to FieldValue.arrayUnion(uid),
+                    "memberNames.$uid" to actorName,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+
+            val joinedSnap = wsRef.get().await()
+            val joinedWs = joinedSnap.toObject(
+                TeamWorkspace::class.java,
+                DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+            ) ?: TeamWorkspace(
+                id = workspaceId,
+                name = inviteSnap.getString("workspaceName") ?: DEFAULT_WORKSPACE_NAME,
+                inviteCode = code,
+                memberUids = listOf(uid),
+                memberNames = mapOf(uid to actorName)
+            )
+            Result.success(joinedWs)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, targetPath)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun syncMemberListsOnWorkspaceDocs(
+        workspace: TeamWorkspace,
+        period: ChecklistPeriod?,
+        issues: List<PjuIssue>,
+        messages: List<ChatMessage>
+    ) {
+        val uid = auth.currentUser?.uid ?: return
+        val targetMembers = workspace.memberUids
+        if (targetMembers.isEmpty() || uid !in targetMembers) return
+
+        val missingOnPeriod = period != null &&
+            period.id.isNotBlank() &&
+            uid in period.memberUids &&
+            !period.memberUids.containsAll(targetMembers)
+
+        val outdatedIssues = issues.filter {
+            it.id.isNotBlank() && uid in it.memberUids && !it.memberUids.containsAll(targetMembers)
+        }
+        val outdatedMessages = messages.filter {
+            it.id.isNotBlank() && uid in it.memberUids && !it.memberUids.containsAll(targetMembers)
+        }
+
+        if (!missingOnPeriod && outdatedIssues.isEmpty() && outdatedMessages.isEmpty()) return
+
+        try {
+            val batch = db.batch()
+            var ops = 0
+            val actorName = currentDisplayName()
+
+            if (missingOnPeriod && period != null) {
+                batch.update(
+                    periodDocRef(workspace.id, period.id),
+                    mapOf(
+                        "memberUids" to targetMembers,
+                        "updatedByUid" to uid,
+                        "updatedByName" to actorName,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+                ops++
+            }
+            for (issue in outdatedIssues) {
+                if (ops >= 450) break
+                batch.update(
+                    periodDocRef(workspace.id, issue.periodId)
+                        .collection("issues").document(issue.id),
+                    mapOf(
+                        "memberUids" to targetMembers,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+                ops++
+            }
+            for (msg in outdatedMessages) {
+                if (ops >= 450) break
+                batch.update(
+                    messagesCollection(workspace.id).document(msg.id),
+                    mapOf("memberUids" to targetMembers)
+                )
+                ops++
+            }
+            if (ops > 0) {
+                batch.commit().await()
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, "workspaces/${workspace.id}")
+        }
+    }
+
+    fun observePeriod(workspace: TeamWorkspace, userId: String, month: String, year: Int): Flow<ChecklistPeriod> = flow {
         val uid = requireUserId(userId)
         val periodId = buildPeriodId(year, month)
-        val docRef = periodDocRef(uid, periodId)
+        val docRef = periodDocRef(workspace.id, periodId)
         emitAll(
             docRef.snapshots()
                 .map { snapshot ->
@@ -80,14 +407,16 @@ class PjuChecklistRepository(
                             DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
                         ) ?: ChecklistPeriod(
                             id = periodId,
-                            userId = uid,
+                            workspaceId = workspace.id,
+                            memberUids = workspace.memberUids,
                             month = month.uppercase(),
                             year = year.toLong()
                         )
                     } else {
                         ChecklistPeriod(
                             id = periodId,
-                            userId = uid,
+                            workspaceId = workspace.id,
+                            memberUids = workspace.memberUids,
                             month = month.uppercase(),
                             year = year.toLong()
                         )
@@ -107,18 +436,21 @@ class PjuChecklistRepository(
         )
     }
 
-    fun observeIssues(userId: String, month: String, year: Int): Flow<List<PjuIssue>> = flow {
+    fun observeIssues(workspace: TeamWorkspace, userId: String, month: String, year: Int): Flow<List<PjuIssue>> = flow {
         val uid = requireUserId(userId)
         val periodId = buildPeriodId(year, month)
-        val collectionRef = periodDocRef(uid, periodId).collection("issues")
+        val collectionRef = periodDocRef(workspace.id, periodId).collection("issues")
         emitAll(
             collectionRef
-                .orderBy("date", Query.Direction.ASCENDING)
+                .whereArrayContains("memberUids", uid)
                 .snapshots()
                 .map { snapshot ->
                     snapshot.toObjects(
                         PjuIssue::class.java,
                         DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                    ).sortedWith(
+                        compareBy<PjuIssue> { it.date }
+                            .thenBy { it.createdAt?.toDate()?.time ?: 0L }
                     )
                 }
                 .catch { error ->
@@ -135,7 +467,88 @@ class PjuChecklistRepository(
         )
     }
 
+    fun observeChatMessages(workspace: TeamWorkspace, userId: String): Flow<List<ChatMessage>> = flow {
+        val uid = requireUserId(userId)
+        val collectionRef = messagesCollection(workspace.id)
+        emitAll(
+            collectionRef
+                .whereArrayContains("memberUids", uid)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(
+                        ChatMessage::class.java,
+                        DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                    ).sortedBy { it.createdAt?.toDate()?.time ?: Long.MAX_VALUE }
+                }
+                .catch { error ->
+                    val firestoreError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (firestoreError == null && error is CancellationException) throw error
+                    val exceptionToLog = firestoreError ?: (error as? Exception)
+                    if (exceptionToLog != null && auth.currentUser?.uid == uid) {
+                        handleFirestoreError(exceptionToLog, OperationType.LIST, collectionRef.path)
+                    }
+                    throw error
+                }
+        )
+    }
+
+    suspend fun sendChatMessage(
+        workspace: TeamWorkspace,
+        userId: String,
+        text: String,
+        tagCluster: String = ""
+    ): Result<Unit> {
+        val collectionRef = messagesCollection(workspace.id)
+        val docRef = collectionRef.document()
+        return try {
+            val uid = requireUserId(userId)
+            val cleanText = text.trim().take(1000)
+            require(cleanText.isNotBlank()) { "Pesan tidak boleh kosong" }
+            val cleanTag = tagCluster.trim().take(60)
+            val members = workspace.memberUids.ifEmpty { listOf(uid) }.take(50)
+            val payload = mapOf(
+                "workspaceId" to workspace.id,
+                "memberUids" to members,
+                "senderId" to uid,
+                "senderName" to currentDisplayName(),
+                "senderEmail" to currentEmail(),
+                "text" to cleanText,
+                "tagCluster" to cleanTag,
+                "createdAt" to FieldValue.serverTimestamp()
+            )
+            docRef.set(payload).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteChatMessage(
+        workspace: TeamWorkspace,
+        userId: String,
+        messageId: String
+    ): Result<Unit> {
+        val docRef = messagesCollection(workspace.id).document(messageId)
+        return try {
+            requireUserId(userId)
+            require(messageId.isNotBlank()) { "ID pesan tidak boleh kosong" }
+            docRef.delete().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
     suspend fun setCellStatus(
+        workspace: TeamWorkspace,
         userId: String,
         month: String,
         year: Int,
@@ -145,9 +558,10 @@ class PjuChecklistRepository(
         nextStatus: LampStatus
     ): Result<Unit> {
         val periodId = buildPeriodId(year, month)
-        val docRef = periodDocRef(userId, periodId)
+        val docRef = periodDocRef(workspace.id, periodId)
         return try {
             val uid = requireUserId(userId)
+            val actorName = currentDisplayName()
             require(clusterId in 1..9) { "Cluster ID tidak valid" }
             require(slotIndex in 0..2) { "Slot index tidak valid" }
             require(date in 1..31) { "Tanggal tidak valid" }
@@ -156,12 +570,24 @@ class PjuChecklistRepository(
             val snapshot = docRef.get().await()
             if (!snapshot.exists()) {
                 val initialChecks = if (nextStatus == LampStatus.EMPTY) emptyMap() else mapOf(cellKey to nextStatus.code)
-                docRef.set(initialPeriodPayload(uid, month, year, checks = initialChecks)).await()
+                docRef.set(
+                    initialPeriodPayload(
+                        workspace = workspace,
+                        actorUid = uid,
+                        actorName = actorName,
+                        month = month,
+                        year = year,
+                        checks = initialChecks
+                    )
+                ).await()
             } else {
                 val valueToWrite: Any = if (nextStatus == LampStatus.EMPTY) FieldValue.delete() else nextStatus.code
                 docRef.update(
                     mapOf(
                         "checks.$cellKey" to valueToWrite,
+                        "memberUids" to workspace.memberUids.ifEmpty { listOf(uid) }.take(50),
+                        "updatedByUid" to uid,
+                        "updatedByName" to actorName,
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
                 ).await()
@@ -176,6 +602,7 @@ class PjuChecklistRepository(
     }
 
     suspend fun updateSlotLabels(
+        workspace: TeamWorkspace,
         userId: String,
         month: String,
         year: Int,
@@ -183,16 +610,19 @@ class PjuChecklistRepository(
         labels: List<String>
     ): Result<Unit> {
         val periodId = buildPeriodId(year, month)
-        val docRef = periodDocRef(userId, periodId)
+        val docRef = periodDocRef(workspace.id, periodId)
         return try {
             val uid = requireUserId(userId)
+            val actorName = currentDisplayName()
             require(clusterId in 1..9) { "Cluster ID tidak valid" }
             val sanitized = (0 until 3).map { idx -> labels.getOrNull(idx)?.trim()?.take(60) ?: "" }
             val snapshot = docRef.get().await()
             if (!snapshot.exists()) {
                 docRef.set(
                     initialPeriodPayload(
-                        userId = uid,
+                        workspace = workspace,
+                        actorUid = uid,
+                        actorName = actorName,
                         month = month,
                         year = year,
                         slotLabels = mapOf(clusterId.toString() to sanitized)
@@ -202,6 +632,9 @@ class PjuChecklistRepository(
                 docRef.update(
                     mapOf(
                         "slotLabels.$clusterId" to sanitized,
+                        "memberUids" to workspace.memberUids.ifEmpty { listOf(uid) }.take(50),
+                        "updatedByUid" to uid,
+                        "updatedByName" to actorName,
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
                 ).await()
@@ -216,23 +649,37 @@ class PjuChecklistRepository(
     }
 
     suspend fun updateGeneralNotes(
+        workspace: TeamWorkspace,
         userId: String,
         month: String,
         year: Int,
         notes: String
     ): Result<Unit> {
         val periodId = buildPeriodId(year, month)
-        val docRef = periodDocRef(userId, periodId)
+        val docRef = periodDocRef(workspace.id, periodId)
         return try {
             val uid = requireUserId(userId)
+            val actorName = currentDisplayName()
             val safeNotes = notes.take(2000)
             val snapshot = docRef.get().await()
             if (!snapshot.exists()) {
-                docRef.set(initialPeriodPayload(uid, month, year, generalNotes = safeNotes)).await()
+                docRef.set(
+                    initialPeriodPayload(
+                        workspace = workspace,
+                        actorUid = uid,
+                        actorName = actorName,
+                        month = month,
+                        year = year,
+                        generalNotes = safeNotes
+                    )
+                ).await()
             } else {
                 docRef.update(
                     mapOf(
                         "generalNotes" to safeNotes,
+                        "memberUids" to workspace.memberUids.ifEmpty { listOf(uid) }.take(50),
+                        "updatedByUid" to uid,
+                        "updatedByName" to actorName,
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
                 ).await()
@@ -247,23 +694,37 @@ class PjuChecklistRepository(
     }
 
     suspend fun updatePicName(
+        workspace: TeamWorkspace,
         userId: String,
         month: String,
         year: Int,
         picName: String
     ): Result<Unit> {
         val periodId = buildPeriodId(year, month)
-        val docRef = periodDocRef(userId, periodId)
+        val docRef = periodDocRef(workspace.id, periodId)
         return try {
             val uid = requireUserId(userId)
+            val actorName = currentDisplayName()
             val safePic = picName.trim().take(150)
             val snapshot = docRef.get().await()
             if (!snapshot.exists()) {
-                docRef.set(initialPeriodPayload(uid, month, year, picName = safePic)).await()
+                docRef.set(
+                    initialPeriodPayload(
+                        workspace = workspace,
+                        actorUid = uid,
+                        actorName = actorName,
+                        month = month,
+                        year = year,
+                        picName = safePic
+                    )
+                ).await()
             } else {
                 docRef.update(
                     mapOf(
                         "picName" to safePic,
+                        "memberUids" to workspace.memberUids.ifEmpty { listOf(uid) }.take(50),
+                        "updatedByUid" to uid,
+                        "updatedByName" to actorName,
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
                 ).await()
@@ -278,6 +739,7 @@ class PjuChecklistRepository(
     }
 
     suspend fun addIssue(
+        workspace: TeamWorkspace,
         userId: String,
         month: String,
         year: Int,
@@ -289,10 +751,11 @@ class PjuChecklistRepository(
         status: IssueStatus
     ): Result<Unit> {
         val periodId = buildPeriodId(year, month)
-        val periodRef = periodDocRef(userId, periodId)
+        val periodRef = periodDocRef(workspace.id, periodId)
         val issueRef = periodRef.collection("issues").document()
         return try {
             val uid = requireUserId(userId)
+            val actorName = currentDisplayName()
             val cleanUnit = unit.trim().take(100)
             val cleanDesc = desc.trim().take(500)
             val cleanClusterName = clusterName.trim().take(60)
@@ -305,11 +768,23 @@ class PjuChecklistRepository(
             val periodExists = periodRef.get().await().exists()
             val batch = db.batch()
             if (!periodExists) {
-                batch.set(periodRef, initialPeriodPayload(uid, month, year))
+                batch.set(
+                    periodRef,
+                    initialPeriodPayload(
+                        workspace = workspace,
+                        actorUid = uid,
+                        actorName = actorName,
+                        month = month,
+                        year = year
+                    )
+                )
             }
             val issuePayload = mapOf(
-                "userId" to uid,
+                "workspaceId" to workspace.id,
                 "periodId" to periodId,
+                "memberUids" to workspace.memberUids.ifEmpty { listOf(uid) }.take(50),
+                "createdByUid" to uid,
+                "createdByName" to actorName,
                 "date" to date.toLong(),
                 "clusterId" to clusterId.toLong(),
                 "clusterName" to cleanClusterName,
@@ -331,13 +806,14 @@ class PjuChecklistRepository(
     }
 
     suspend fun cycleIssueStatus(
+        workspace: TeamWorkspace,
         userId: String,
         month: String,
         year: Int,
         issue: PjuIssue
     ): Result<Unit> {
         val periodId = buildPeriodId(year, month)
-        val issueRef = periodDocRef(userId, periodId).collection("issues").document(issue.id)
+        val issueRef = periodDocRef(workspace.id, periodId).collection("issues").document(issue.id)
         return try {
             requireUserId(userId)
             require(issue.id.isNotBlank()) { "ID laporan tidak boleh kosong" }
@@ -345,6 +821,7 @@ class PjuChecklistRepository(
             issueRef.update(
                 mapOf(
                     "status" to nextStatus.label,
+                    "memberUids" to workspace.memberUids.ifEmpty { listOf(userId) }.take(50),
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
             ).await()
@@ -358,13 +835,14 @@ class PjuChecklistRepository(
     }
 
     suspend fun deleteIssue(
+        workspace: TeamWorkspace,
         userId: String,
         month: String,
         year: Int,
         issueId: String
     ): Result<Unit> {
         val periodId = buildPeriodId(year, month)
-        val issueRef = periodDocRef(userId, periodId).collection("issues").document(issueId)
+        val issueRef = periodDocRef(workspace.id, periodId).collection("issues").document(issueId)
         return try {
             requireUserId(userId)
             require(issueId.isNotBlank()) { "ID laporan tidak boleh kosong" }
@@ -379,15 +857,19 @@ class PjuChecklistRepository(
     }
 
     suspend fun resetPeriod(
+        workspace: TeamWorkspace,
         userId: String,
         month: String,
         year: Int
     ): Result<Unit> {
         val periodId = buildPeriodId(year, month)
-        val periodRef = periodDocRef(userId, periodId)
+        val periodRef = periodDocRef(workspace.id, periodId)
         return try {
-            requireUserId(userId)
-            val issuesSnapshot = periodRef.collection("issues").get().await()
+            val uid = requireUserId(userId)
+            val issuesSnapshot = periodRef.collection("issues")
+                .whereArrayContains("memberUids", uid)
+                .get()
+                .await()
             val batch = db.batch()
             for (doc in issuesSnapshot.documents) {
                 batch.delete(doc.reference)

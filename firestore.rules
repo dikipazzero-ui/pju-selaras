@@ -26,6 +26,146 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    function isValidMemberList(uids) {
+      return uids is list &&
+             uids.size() >= 1 &&
+             uids.size() <= 50 &&
+             uids[0] is string;
+    }
+
+    function isWorkspaceMember(workspaceId) {
+      return isSignedIn() &&
+             exists(/databases/$(database)/documents/workspaces/$(workspaceId)) &&
+             request.auth.uid in get(/databases/$(database)/documents/workspaces/$(workspaceId)).data.memberUids;
+    }
+
+    function isWorkspaceOwner(workspaceId) {
+      return isSignedIn() &&
+             exists(/databases/$(database)/documents/workspaces/$(workspaceId)) &&
+             get(/databases/$(database)/documents/workspaces/$(workspaceId)).data.ownerId == request.auth.uid;
+    }
+
+    function isValidWorkspace(data) {
+      return data.name is string &&
+             data.name.size() >= 2 &&
+             data.name.size() <= 60 &&
+             data.ownerId is string &&
+             data.ownerId.size() >= 1 &&
+             data.ownerId.size() <= 128 &&
+             data.inviteCode is string &&
+             data.inviteCode.size() >= 4 &&
+             data.inviteCode.size() <= 16 &&
+             data.inviteCode.matches('^[A-Z0-9_\\-]+$') &&
+             isValidMemberList(data.memberUids) &&
+             data.ownerId in data.memberUids &&
+             data.memberNames is map &&
+             data.memberNames.size() >= 1 &&
+             data.memberNames.size() <= 50 &&
+             data.memberNames.keys().hasAll(data.memberUids) &&
+             data.createdAt is timestamp &&
+             data.createdAt <= request.time &&
+             data.updatedAt is timestamp &&
+             data.updatedAt <= request.time;
+    }
+
+    function isValidWorkspaceInvite(data) {
+      return isValidId(data.workspaceId) &&
+             data.workspaceName is string &&
+             data.workspaceName.size() >= 2 &&
+             data.workspaceName.size() <= 60 &&
+             data.ownerId is string &&
+             data.ownerId.size() >= 1 &&
+             data.ownerId.size() <= 128 &&
+             data.createdAt is timestamp &&
+             data.createdAt <= request.time;
+    }
+
+    function isValidSharedPeriod(data, workspaceId) {
+      return data.workspaceId is string &&
+             data.workspaceId == workspaceId &&
+             isValidMemberList(data.memberUids) &&
+             data.updatedByUid is string &&
+             data.updatedByUid.size() >= 1 &&
+             data.updatedByUid.size() <= 128 &&
+             data.updatedByName is string &&
+             data.updatedByName.size() >= 1 &&
+             data.updatedByName.size() <= 80 &&
+             data.month is string &&
+             data.month.size() >= 3 &&
+             data.month.size() <= 20 &&
+             data.year is int &&
+             data.year >= 2020 &&
+             data.year <= 2100 &&
+             data.checks is map &&
+             data.checks.size() <= 1000 &&
+             data.slotLabels is map &&
+             data.slotLabels.size() <= 20 &&
+             data.generalNotes is string &&
+             data.generalNotes.size() <= 2000 &&
+             data.picName is string &&
+             data.picName.size() <= 150 &&
+             data.createdAt is timestamp &&
+             data.createdAt <= request.time &&
+             data.updatedAt is timestamp &&
+             data.updatedAt <= request.time;
+    }
+
+    function isValidSharedIssue(data, workspaceId, periodId) {
+      return data.workspaceId is string &&
+             data.workspaceId == workspaceId &&
+             data.periodId is string &&
+             data.periodId == periodId &&
+             isValidMemberList(data.memberUids) &&
+             data.createdByUid is string &&
+             data.createdByUid.size() >= 1 &&
+             data.createdByUid.size() <= 128 &&
+             data.createdByName is string &&
+             data.createdByName.size() >= 1 &&
+             data.createdByName.size() <= 80 &&
+             data.date is int &&
+             data.date >= 1 &&
+             data.date <= 31 &&
+             data.clusterId is int &&
+             data.clusterId >= 1 &&
+             data.clusterId <= 9 &&
+             data.clusterName is string &&
+             data.clusterName.size() >= 1 &&
+             data.clusterName.size() <= 60 &&
+             data.unit is string &&
+             data.unit.size() >= 1 &&
+             data.unit.size() <= 100 &&
+             data.desc is string &&
+             data.desc.size() >= 1 &&
+             data.desc.size() <= 500 &&
+             data.status in ['Belum Diperbaiki', 'Dalam Proses', 'Selesai Diperbaiki'] &&
+             data.createdAt is timestamp &&
+             data.createdAt <= request.time &&
+             data.updatedAt is timestamp &&
+             data.updatedAt <= request.time;
+    }
+
+    function isValidChatMessage(data, workspaceId) {
+      return data.workspaceId is string &&
+             data.workspaceId == workspaceId &&
+             isValidMemberList(data.memberUids) &&
+             data.senderId is string &&
+             data.senderId.size() >= 1 &&
+             data.senderId.size() <= 128 &&
+             data.senderName is string &&
+             data.senderName.size() >= 1 &&
+             data.senderName.size() <= 80 &&
+             data.senderEmail is string &&
+             data.senderEmail.size() <= 120 &&
+             data.text is string &&
+             data.text.size() >= 1 &&
+             data.text.size() <= 1000 &&
+             data.tagCluster is string &&
+             data.tagCluster.size() <= 60 &&
+             data.createdAt is timestamp &&
+             data.createdAt <= request.time;
+    }
+
+    // Legacy validators preserved
     function isValidChecklistPeriod(data, userId) {
       return data.userId is string &&
              data.userId == userId &&
@@ -76,6 +216,159 @@ service cloud.firestore {
              data.updatedAt <= request.time;
     }
 
+    // Shared Workspace Invites (direct lookup by inviteCode only; listing forbidden)
+    match /workspaceInvites/{inviteCode} {
+      allow get: if isSignedIn() && isValidId(inviteCode);
+      allow list: if false;
+
+      allow create: if isSignedIn() &&
+                       isValidId(inviteCode) &&
+                       inviteCode.size() >= 4 &&
+                       inviteCode.size() <= 16 &&
+                       inviteCode.matches('^[A-Z0-9_\\-]+$') &&
+                       incoming().keys().hasAll(['workspaceId', 'workspaceName', 'ownerId', 'createdAt']) &&
+                       incoming().keys().hasOnly(['workspaceId', 'workspaceName', 'ownerId', 'createdAt']) &&
+                       incoming().ownerId == request.auth.uid &&
+                       isValidWorkspaceInvite(incoming()) &&
+                       existsAfter(/databases/$(database)/documents/workspaces/$(incoming().workspaceId));
+
+      allow update: if false;
+      allow delete: if isSignedIn() && existing().ownerId == request.auth.uid && isValidId(inviteCode);
+    }
+
+    // Shared Team Workspaces
+    match /workspaces/{workspaceId} {
+      allow get, list: if isSignedIn() && request.auth.uid in existing().memberUids;
+
+      allow create: if isSignedIn() &&
+                       isValidId(workspaceId) &&
+                       incoming().keys().hasAll(['name', 'ownerId', 'inviteCode', 'memberUids', 'memberNames', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['name', 'ownerId', 'inviteCode', 'memberUids', 'memberNames', 'createdAt', 'updatedAt']) &&
+                       incoming().ownerId == request.auth.uid &&
+                       request.auth.uid in incoming().memberUids &&
+                       isValidWorkspace(incoming()) &&
+                       existsAfter(/databases/$(database)/documents/workspaceInvites/$(incoming().inviteCode));
+
+      allow update: if isSignedIn() &&
+                       isValidId(workspaceId) &&
+                       isValidWorkspace(incoming()) &&
+                       incoming().ownerId == existing().ownerId &&
+                       incoming().inviteCode == existing().inviteCode &&
+                       incoming().createdAt == existing().createdAt &&
+                       (
+                         (
+                           existing().ownerId == request.auth.uid &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['name', 'memberUids', 'memberNames', 'updatedAt'])
+                         ) ||
+                         (
+                           !(request.auth.uid in existing().memberUids) &&
+                           request.auth.uid in incoming().memberUids &&
+                           incoming().memberUids.size() == existing().memberUids.size() + 1 &&
+                           incoming().memberUids.hasAll(existing().memberUids) &&
+                           incoming().memberNames.keys().hasAll(existing().memberNames.keys()) &&
+                           incoming().memberNames.size() <= existing().memberNames.size() + 1 &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'memberNames', 'updatedAt']) &&
+                           exists(/databases/$(database)/documents/workspaceInvites/$(existing().inviteCode))
+                         ) ||
+                         (
+                           request.auth.uid in existing().memberUids &&
+                           request.auth.uid != existing().ownerId &&
+                           !(request.auth.uid in incoming().memberUids) &&
+                           existing().memberUids.hasAll(incoming().memberUids) &&
+                           incoming().memberUids.size() == existing().memberUids.size() - 1 &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'memberNames', 'updatedAt'])
+                         )
+                       );
+
+      allow delete: if isSignedIn() && existing().ownerId == request.auth.uid && isValidId(workspaceId);
+
+      // Shared Checklist Periods
+      match /periods/{periodId} {
+        allow get: if isWorkspaceMember(workspaceId) && isValidId(periodId);
+        allow list: if isSignedIn() && request.auth.uid in existing().memberUids;
+
+        allow create: if isWorkspaceMember(workspaceId) &&
+                         isValidId(periodId) &&
+                         incoming().keys().hasAll(['workspaceId', 'memberUids', 'updatedByUid', 'updatedByName', 'month', 'year', 'checks', 'slotLabels', 'generalNotes', 'picName', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['workspaceId', 'memberUids', 'updatedByUid', 'updatedByName', 'month', 'year', 'checks', 'slotLabels', 'generalNotes', 'picName', 'createdAt', 'updatedAt']) &&
+                         incoming().updatedByUid == request.auth.uid &&
+                         request.auth.uid in incoming().memberUids &&
+                         isValidSharedPeriod(incoming(), workspaceId);
+
+        allow update: if isWorkspaceMember(workspaceId) &&
+                         isValidId(periodId) &&
+                         isValidSharedPeriod(incoming(), workspaceId) &&
+                         incoming().workspaceId == existing().workspaceId &&
+                         incoming().month == existing().month &&
+                         incoming().year == existing().year &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().updatedByUid == request.auth.uid &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['checks', 'slotLabels', 'generalNotes', 'picName', 'memberUids', 'updatedByUid', 'updatedByName', 'updatedAt']);
+
+        allow delete: if isWorkspaceMember(workspaceId) && isValidId(periodId);
+
+        // Shared PJU Issues
+        match /issues/{issueId} {
+          allow get: if isWorkspaceMember(workspaceId) && isValidId(periodId) && isValidId(issueId);
+          allow list: if isSignedIn() && request.auth.uid in existing().memberUids;
+
+          allow create: if isWorkspaceMember(workspaceId) &&
+                           isValidId(periodId) &&
+                           isValidId(issueId) &&
+                           incoming().keys().hasAll(['workspaceId', 'periodId', 'memberUids', 'createdByUid', 'createdByName', 'date', 'clusterId', 'clusterName', 'unit', 'desc', 'status', 'createdAt', 'updatedAt']) &&
+                           incoming().keys().hasOnly(['workspaceId', 'periodId', 'memberUids', 'createdByUid', 'createdByName', 'date', 'clusterId', 'clusterName', 'unit', 'desc', 'status', 'createdAt', 'updatedAt']) &&
+                           incoming().createdByUid == request.auth.uid &&
+                           request.auth.uid in incoming().memberUids &&
+                           isValidSharedIssue(incoming(), workspaceId, periodId) &&
+                           existsAfter(/databases/$(database)/documents/workspaces/$(workspaceId)/periods/$(periodId));
+
+          allow update: if isWorkspaceMember(workspaceId) &&
+                           isValidId(periodId) &&
+                           isValidId(issueId) &&
+                           isValidSharedIssue(incoming(), workspaceId, periodId) &&
+                           incoming().workspaceId == existing().workspaceId &&
+                           incoming().periodId == existing().periodId &&
+                           incoming().createdByUid == existing().createdByUid &&
+                           incoming().createdByName == existing().createdByName &&
+                           incoming().createdAt == existing().createdAt &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['date', 'clusterId', 'clusterName', 'unit', 'desc', 'status', 'memberUids', 'updatedAt']);
+
+          allow delete: if isWorkspaceMember(workspaceId) && isValidId(periodId) && isValidId(issueId);
+        }
+      }
+
+      // Live Chat Messages inside Workspace
+      match /messages/{messageId} {
+        allow get: if isWorkspaceMember(workspaceId) && isValidId(messageId);
+        allow list: if isSignedIn() && request.auth.uid in existing().memberUids;
+
+        allow create: if isWorkspaceMember(workspaceId) &&
+                         isValidId(messageId) &&
+                         incoming().keys().hasAll(['workspaceId', 'memberUids', 'senderId', 'senderName', 'senderEmail', 'text', 'tagCluster', 'createdAt']) &&
+                         incoming().keys().hasOnly(['workspaceId', 'memberUids', 'senderId', 'senderName', 'senderEmail', 'text', 'tagCluster', 'createdAt']) &&
+                         incoming().senderId == request.auth.uid &&
+                         request.auth.uid in incoming().memberUids &&
+                         isValidChatMessage(incoming(), workspaceId);
+
+        allow update: if isWorkspaceMember(workspaceId) &&
+                         isValidId(messageId) &&
+                         isValidChatMessage(incoming(), workspaceId) &&
+                         incoming().workspaceId == existing().workspaceId &&
+                         incoming().senderId == existing().senderId &&
+                         incoming().senderName == existing().senderName &&
+                         incoming().senderEmail == existing().senderEmail &&
+                         incoming().text == existing().text &&
+                         incoming().tagCluster == existing().tagCluster &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['memberUids']);
+
+        allow delete: if isSignedIn() &&
+                         isValidId(messageId) &&
+                         (existing().senderId == request.auth.uid || isWorkspaceOwner(workspaceId));
+      }
+    }
+
+    // Legacy user-scoped paths preserved
     match /users/{userId}/periods/{periodId} {
       allow get: if isOwner(userId) && isValidId(periodId);
       allow list: if isOwner(userId);
