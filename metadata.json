@@ -1,5 +1,5 @@
 {
-  "name": "PJU Selaras",
+  "name": "PJU BPS",
   "description": "Digital street light (PJU) inspection checklist and issue tracker for Perumahan Bumi Papan Selaras.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

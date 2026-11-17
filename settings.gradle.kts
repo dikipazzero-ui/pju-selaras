@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "PJU Selaras"
+rootProject.name = "PJU BPS"
 
 include(":app")
